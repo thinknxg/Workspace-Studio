@@ -184,7 +184,7 @@ frappe.pages['workspace-studio'].on_page_load = async wrapper => {
         frappe.prompt([{fieldtype:'Small Text',fieldname:'note',label:'Publish note',reqd:1}],values=>working(async()=>{
             await save();const result=await call('publish',{name:current,note:values.note});
             root.find('#wss-target').val(result.workspace);root.find('#wss-status').text('Published · backup '+result.version);
-            frappe.msgprint(__('Published workspace {0}. Backup version: {1}',[esc(result.workspace),esc(result.version)]));
+            frappe.msgprint({title:__('Native publication result'),message:__('Workspace: {0}<br>Sidebar: {1}<br>Dock: {2}<br>Desktop Icons: {3}<br>Backup version: {4}',[esc(result.workspace),esc(result.sidebar || 'Not requested'),esc(result.dock || 'Not requested'),esc((result.desktop_icons || []).join(', ') || 'Not requested'),esc(result.version)])});
         })(),__('Publish to native ERPNext'),__('Publish'));
     });
     root.find('#wss-history').on('click',working(async()=>{

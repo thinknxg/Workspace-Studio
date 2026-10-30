@@ -77,7 +77,9 @@ def run():
 
 
 if __name__ == "__main__":
-    frappe.init(site="studio.local", sites_path="sites")
+    import os
+    os.chdir("sites")  # Bench commands run inside sites; Frappe log paths depend on it.
+    frappe.init(site="studio.local", sites_path=".")
     frappe.connect()
     try:
         run()

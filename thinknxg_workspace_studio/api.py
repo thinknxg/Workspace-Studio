@@ -138,6 +138,8 @@ def rollback(version_name,note=None):
     try:
         for item in reversed(before):
             native.restore(item)
+        if studio.target_workspace and not frappe.db.exists("Workspace", studio.target_workspace):
+            studio.target_workspace = None
         studio.status="Draft"
         studio.save(ignore_permissions=True)
         new=snapshot(studio,"Rolled Back",note or "Restored native backup",

@@ -80,3 +80,11 @@ No server deployment or production certification is included.
 Choose an existing **Module** before Save or Publish. Missing or deleted modules are rejected before writes with an actionable message. When older API callers omit the module on an existing design, its saved module is retained. A removed module stays visible in the selector for correction rather than silently clearing. No Studio DocType schema change is required.
 
 The page explicitly loads its designer stylesheet as well as its state model. At desktop widths Components, Canvas and Properties appear side by side; medium widths move Properties below, and narrow screens stack the panels. If an older cached page still appears unstyled after updating the code, rebuild the app assets, clear the site cache and hard-refresh Desk.
+
+### Native publishing on current v16 — integration investigation
+
+Current v16 protects app-owned Sidebar documents outside developer mode. Workspace Studio uses the site-wide **Custom Sidebar** layer when available, retaining the older Sidebar mapping for earlier schemas. Published rows are marked as additions, and the native permission resolver remains authoritative.
+
+On the legacy Desktop Icon grid, destinations are real **Workspace** documents. Studio sets the native icon type and validates the Workspace before adapting the archived Dynamic Link declaration used by v16. The site must already use **Desktop Settings → Desktop Icons**; Apps mode is rejected with an actionable message. Studio does not silently switch the global desktop mode.
+
+The draft integration workflow creates a disposable ERPNext 16.51.0 / Frappe 16.52.0 site with real MariaDB and Redis, installs the app, and checks native documents, resolved Sidebar items, Desktop Icon payload visibility and rollback. See the workflow results for evidence; neither local mocks nor a sample front-end preview establish live publishing correctness.
