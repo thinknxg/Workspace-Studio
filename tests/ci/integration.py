@@ -75,6 +75,10 @@ def run():
     assert repeated["desktop_icons"] == result["desktop_icons"]
     restored = api.rollback(repeated["version"], note="Integration restore existing native documents")
     assert restored["restored"] == 3
+    restored_workspace = frappe.get_doc("Workspace", result["workspace"])
+    assert restored_workspace.shortcuts and restored_workspace.shortcuts[0].link_to == "Customer", "Rollback lost native Workspace reference rows"
+    restored_sidebar = frappe.get_doc("Custom Sidebar", result["sidebar"])
+    assert restored_sidebar.sidebar_items and restored_sidebar.sidebar_items[0].label == "Studio Customers", "Rollback lost native Sidebar rows"
     print("EXISTING NATIVE RESTORE", restored)
     # The first version is deliberately stale now: its conflict guard must refuse it.
     try:

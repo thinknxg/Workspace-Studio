@@ -48,6 +48,12 @@ def restore(snapshot):
     if frappe.db.exists(dt, name):
         current = frappe.get_doc(dt, name)
         current.update(data)
+        # Publication replaces child rows. A snapshot may name rows that were
+        # deleted by that replacement; db_update would silently update no row.
+        # Mark only missing children for insertion, retaining snapshot identities.
+        for row in current.get_all_children():
+            if not frappe.db.exists(row.doctype, row.name):
+                row.set("__islocal", True)
         if dt == "Desktop Icon" and data.get("link_type") == "Workspace Sidebar" and "icon_type" in fields(dt):
             if not data.get("link_to") or not frappe.db.exists("Workspace", data["link_to"]):
                 frappe.throw(_("Cannot restore Desktop Icon: its Workspace no longer exists"))
