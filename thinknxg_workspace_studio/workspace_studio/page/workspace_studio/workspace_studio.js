@@ -70,7 +70,8 @@ frappe.pages['workspace-studio'].on_page_load = async wrapper => {
             const type=cfg[typeKey] || supported[0] || 'DocType';
             const options=Array.from(new Set([...(supported.length ? supported : ['DocType','Report','Page','Workspace','Dashboard','URL']),type])).join('\n');
             control(host,{fieldtype:'Select',label:'Link type',options},type,v=>{cfg[typeKey]=v;cfg.link_to='';renderProperties();});
-            field(cfg,'link_to','Destination',['URL','External'].includes(type) ? 'Data' : 'Link',['URL','External'].includes(type) ? null : type);
+            const destinationType=surface==='desktop' && type==='Workspace Sidebar' ? 'Workspace' : type;
+            field(cfg,'link_to','Destination',['URL','External'].includes(type) ? 'Data' : 'Link',['URL','External'].includes(type) ? null : destinationType);
             if (!workspace) field(row,'icon','Icon');
             if (surface === 'dock') field(row,'sidebar','Sidebar / module');
             if (surface === 'sidebar' || surface === 'desktop') field(row,'hidden','Hidden','Check');
@@ -117,7 +118,7 @@ frappe.pages['workspace-studio'].on_page_load = async wrapper => {
         root.find('.wss-edit').toggle(!preview); root.find('.wss-layout').toggleClass('wss-preview',preview);
         root.find('#wss-preview').text(preview?'Exit preview':'Preview');
         root.find('#wss-canvas-title').text(labels[surface]+(preview?' preview':''));
-        root.find('#wss-help').text(preview ? 'Layout preview. Charts and numbers are placeholders; native rendering depends on your installed Frappe schema.' : surface==='sidebar' ? (nestingSupported() ? 'Drag to reorder. Nested items move with their parent.' : 'Drag to reorder. Numeric nesting is unavailable in this installed Sidebar schema.') : surface==='desktop' ? 'Order is saved in the design. Native Desktop Icons have no position mapping; removing one here does not delete a published icon.' : 'Drop before an item to reorder, or append at the bottom.');
+        root.find('#wss-help').text(preview ? 'Layout preview. Charts and numbers are placeholders; native rendering depends on your installed Frappe schema.' : surface==='sidebar' ? (nestingSupported() ? 'Drag to reorder. Nested items move with their parent.' : 'Drag to reorder. Numeric nesting is unavailable in this installed Sidebar schema.') : surface==='desktop' ? 'Choose an existing Workspace. Visibility requires Desktop Settings → Desktop Icons. Removing an item here does not delete a published icon.' : 'Drop before an item to reorder, or append at the bottom.');
         const palette=root.find('#wss-palette').empty();
         (surface==='workspace'?M.types:['link']).forEach(type=>palette.append($('<button class="wss-palette-item btn btn-default" draggable="true"></button>').attr('data-type',type).text('+ '+(type==='link'?labels[surface]+' item':type.replaceAll('_',' ')))));
         renderOptions(); drawCanvas();renderProperties();

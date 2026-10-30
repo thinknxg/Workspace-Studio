@@ -148,19 +148,32 @@ def publish_workspace(studio, capture_before, capture_after):
     capture_after.append(capture("Workspace",saved))
     return saved
 
+def sidebar_doctype():
+    # Current v16 app-owned Sidebar documents are read-only outside developer mode.
+    # Site intent belongs in Custom Sidebar; do not bypass the native app-content guard.
+    if available("Custom Sidebar") and available("Sidebar"):
+        return "Custom Sidebar"
+    return "Sidebar" if available("Sidebar") else "Workspace Sidebar" if available("Workspace Sidebar") else None
+
+
 def publish_navigation(studio, capture_before, capture_after):
     nav = json_value(studio.navigation_json)
     if not nav or "items" not in nav: return None
-    dt = "Sidebar" if available("Sidebar") else "Workspace Sidebar" if available("Workspace Sidebar") else None
+    dt = sidebar_doctype()
     if not dt: frappe.throw(_("No supported Sidebar DocType installed"))
     module_field = choose(dt, ["module","module_name"],required=True)
-    existing = frappe.db.get_value(dt,{module_field:studio.module_name},"name")
+    filters = {module_field: studio.module_name}
+    if dt == "Custom Sidebar": filters["user"] = ["is", "not set"]
+    existing = frappe.db.get_value(dt,filters,"name")
     doc = frappe.get_doc(dt,existing) if existing else frappe.new_doc(dt)
     put(doc,[module_field],studio.module_name)
+    if dt == "Custom Sidebar": put(doc,["user"], "", required=True)
     put(doc,["title","label"],nav.get("title") or studio.workspace_title)
     table = choose(dt,["items","sidebar_items","links","entries"],table=True,required=True)
     items = copy.deepcopy(nav["items"])
     child_fields = fields(fields(dt)[table].options)
+    if dt == "Custom Sidebar":
+        for item in items: item["added"] = 1
     # Modern v16 separates the row kind from the destination DocType.
     if "type" in child_fields and "link_type" in child_fields:
         for item in items:
@@ -173,7 +186,7 @@ def publish_navigation(studio, capture_before, capture_after):
         "label":["label","title"],"type":["type","link_type"],
         "link_type":["link_type"],"url":["url"],
         "link_to":["link_to","link","target"],"icon":["icon"],
-        "indent":["indent","level"],"hidden":["hidden","is_hidden"]
+        "indent":["indent","level"],"hidden":["hidden","is_hidden"],"added":["added"]
     })
     previous=capture(dt,existing) if existing else None
     name=write(doc)
@@ -217,6 +230,10 @@ def publish_desktop_icons(studio,capture_before,capture_after):
     icons=design.get("desktop_icons")
     if icons is None: return []
     if not available("Desktop Icon"): frappe.throw(_("Desktop Icon DocType is unavailable"))
+    if icons and available("Desktop Settings") and "desktop_page" in fields("Desktop Settings"):
+        mode = frappe.db.get_single_value("Desktop Settings", "desktop_page") or "Apps"
+        if mode != "Desktop Icons":
+            frappe.throw(_("Desktop Icons are not visible in Apps mode. Select Desktop Icons in Desktop Settings, then publish again."))
     results=[]
     label_field=choose("Desktop Icon",["label","title"],required=True)
     for icon in icons:
@@ -226,13 +243,28 @@ def publish_desktop_icons(studio,capture_before,capture_after):
         doc=frappe.get_doc("Desktop Icon",existing) if existing else frappe.new_doc("Desktop Icon")
         put(doc,[label_field],label)
         values = copy.deepcopy(icon)
-        if values.get("link_type") == "External": values["link"] = values.pop("link_to", "")
+        icon_fields = fields("Desktop Icon")
+        legacy_grid = "icon_type" in icon_fields and "Workspace Sidebar" in (icon_fields.get("link_type").options or "")
+        workspace_link = legacy_grid and values.get("link_type") in ("Workspace", "Workspace Sidebar")
+        if workspace_link:
+            if not values.get("link_to") or not frappe.db.exists("Workspace", values["link_to"]):
+                frappe.throw(_("Desktop Icon destination must be an existing Workspace"))
+            # Native v16 retains a deprecated Dynamic Link declaration. Its own icon
+            # creator ignores that link after resolving a real Workspace; do the same
+            # only after checking the actual Workspace, never for arbitrary targets.
+            values["link_type"] = "Workspace Sidebar"
+        if legacy_grid:
+            put(doc, ["icon_type"], "Link", required=True)
+        if values.get("link_type") in ("External", "URL"):
+            if legacy_grid: values["link_type"] = "External"
+            values["link"] = values.pop("link_to", "")
         for key, aliases in {
             "link":["link"], "icon":["icon"],"link_to":["link_to","link"],"link_type":["link_type","type"],
             "hidden":["hidden","is_hidden"]
         }.items():
             if key in values: put(doc,aliases,values[key],required=True)
         previous=capture("Desktop Icon",existing) if existing else None
+        if workspace_link: doc.flags.ignore_links = True
         name=write(doc)
         capture_before.append(previous or {"doctype":"Desktop Icon","name":name,"existed":False})
         capture_after.append(capture("Desktop Icon",name))
@@ -250,11 +282,11 @@ def publish(studio):
 def inspect():
     return {dt:[{"fieldname":f.fieldname,"fieldtype":f.fieldtype,"options":f.options}
                  for f in frappe.get_meta(dt).fields]
-            for dt in ["Workspace","Workspace Sidebar","Sidebar","Dock","Desktop Icon"] if available(dt)}
+            for dt in ["Workspace","Workspace Sidebar","Sidebar","Custom Sidebar","Dock","Desktop Icon","Desktop Settings"] if available(dt)}
 
 
 def designer_capabilities():
-    dt = "Sidebar" if available("Sidebar") else "Workspace Sidebar" if available("Workspace Sidebar") else None
+    dt = sidebar_doctype()
     table = choose(dt, ["items", "sidebar_items", "links", "entries"], table=True) if dt else None
     child = fields(fields(dt)[table].options) if table else {}
     indent = next((child[k] for k in ("indent", "level") if k in child), None)
@@ -265,8 +297,11 @@ def designer_capabilities():
             ff = fields(ff[table_name].options) if table_name else {}
         field = ff.get("link_type") or ff.get("type")
         return [x for x in (field.options or "").split("\n") if x] if field and field.fieldtype == "Select" else []
-    return {"sidebar_indent": bool(indent and indent.fieldtype == "Int"),
+    desktop_types = link_types("Desktop Icon")
+    if "icon_type" in fields("Desktop Icon"):
+        desktop_types = ["Workspace" if value == "Workspace Sidebar" else value for value in desktop_types]
+    return {"sidebar_doctype": dt, "sidebar_indent": bool(indent and indent.fieldtype == "Int"),
             "link_types": {"workspace": link_types("Workspace Shortcut"),
                            "sidebar": link_types(dt, ["items", "sidebar_items", "links", "entries"]) if dt else [],
                            "dock": link_types("Dock", ["items", "entries", "dock_items", "links"]),
-                           "desktop": link_types("Desktop Icon")}}
+                           "desktop": desktop_types}}

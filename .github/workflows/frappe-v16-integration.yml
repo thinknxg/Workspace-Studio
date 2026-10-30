@@ -29,8 +29,7 @@ jobs:
       - name: Exercise real native publishing, runtime visibility and rollback
         run: |
           docker compose -f tests/ci/compose.yml exec -T backend bash -euc '
-            cp apps/thinknxg_workspace_studio/tests/ci/integration.py /tmp/wss_integration.py
-            PYTHONPATH=/tmp bench --site studio.local execute wss_integration.run
+            env/bin/python apps/thinknxg_workspace_studio/tests/ci/integration.py
           '
       - name: Record container logs
         if: always()
