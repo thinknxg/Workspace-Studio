@@ -67,10 +67,36 @@ def run():
     print("VISIBLE DESKTOP ICON", icon.as_dict())
     before = frappe.parse_json(frappe.get_doc("Studio Version", result["version"]).snapshot_json)["native"]["before"]
     assert any(item["doctype"] == "Custom Sidebar" for item in before), "Modern v16 must publish a site customization, not app-owned Sidebar"
-    rollback = api.rollback(result["version"], note="Integration rollback")
+    # Re-publishing updates the same site-layer and icon records. Roll back that
+    # update before rolling back their creation; restoring an existing legacy icon
+    # must validate the real Workspace rather than the archived Dynamic Link type.
+    repeated = api.publish(saved["name"], note="Integration repeat publish")
+    assert repeated["sidebar"] == result["sidebar"]
+    assert repeated["desktop_icons"] == result["desktop_icons"]
+    restored = api.rollback(repeated["version"], note="Integration restore existing native documents")
+    assert restored["restored"] == 3
+    print("EXISTING NATIVE RESTORE", restored)
+    # The first version is deliberately stale now: its conflict guard must refuse it.
+    try:
+        api.rollback(result["version"], note="Must reject stale version")
+    except frappe.ValidationError as error:
+        assert "changed since publication" in str(error), str(error)
+    else:
+        raise AssertionError("A stale native backup must not overwrite later restores")
+    # Capture a fresh publication whose backup contains the existing documents,
+    # then verify rollback again. The initial creation is cleaned up with the test transaction.
+    fresh = api.publish(saved["name"], note="Integration fresh publish after rollback")
+    rollback = api.rollback(fresh["version"], note="Integration rollback")
     print("ROLLBACK RESULT", rollback)
-    assert not frappe.db.exists("Workspace", result["workspace"])
-    assert not frappe.db.exists("Desktop Icon", result["desktop_icons"][0])
+    assert frappe.db.exists("Workspace", result["workspace"])
+    assert frappe.db.exists("Desktop Icon", result["desktop_icons"][0])
+    assert frappe.get_doc("Studio Workspace", saved["name"]).status == "Draft"
+    cleanup_title = title + " Cleanup"
+    cleanup_design = api.save_design(title=cleanup_title, module="Selling", layout='{"components":[]}', navigation='{}', dock='{}')
+    cleanup_publish = api.publish(cleanup_design["name"], note="Integration create and remove target")
+    api.rollback(cleanup_publish["version"], note="Integration delete new native target")
+    assert not frappe.db.exists("Workspace", cleanup_publish["workspace"])
+    assert not frappe.get_doc("Studio Workspace", cleanup_design["name"]).target_workspace
     frappe.db.rollback()
     print("PASS real ERPNext native publish and rollback")
     return {"status": "passed", "workspace": title}

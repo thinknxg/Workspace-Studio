@@ -48,6 +48,10 @@ def restore(snapshot):
     if frappe.db.exists(dt, name):
         current = frappe.get_doc(dt, name)
         current.update(data)
+        if dt == "Desktop Icon" and data.get("link_type") == "Workspace Sidebar" and "icon_type" in fields(dt):
+            if not data.get("link_to") or not frappe.db.exists("Workspace", data["link_to"]):
+                frappe.throw(_("Cannot restore Desktop Icon: its Workspace no longer exists"))
+            current.flags.ignore_links = True
         current.save(ignore_permissions=True)
     else:
         doc = frappe.get_doc(data)
