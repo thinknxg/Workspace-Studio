@@ -74,7 +74,7 @@ def write(doc):
         doc.save(ignore_permissions=True)
     return doc.name
 
-def set_child_rows(doc, field_name, items, mapping):
+def set_child_rows(doc, field_name, items, mapping, optional=()):
     field = choose(doc.doctype, [field_name], table=True, required=True)
     child_dt = fields(doc.doctype)[field].options
     ff = fields(child_dt)
@@ -84,6 +84,8 @@ def set_child_rows(doc, field_name, items, mapping):
         for src, aliases in mapping.items():
             if src not in item: continue
             dest = next((a for a in aliases if a in ff), None)
+            if dest is None and src in optional:
+                continue
             if dest is None:
                 frappe.throw(_("Missing child field mapping for {0}.{1}").format(child_dt, src))
             row.set(dest, item[src])
@@ -107,8 +109,12 @@ def workspace_blocks(design):
             link_to = cfg.get("link_to")
             if not link_to: frappe.throw(_("Shortcut requires config.link_to"))
             data["shortcut_name"] = title
-            refs["shortcuts"].append({"label":title, "type":cfg.get("link_type","DocType"),
-                **({"url":link_to} if cfg.get("link_type") == "URL" else {"link_to":link_to})})
+            shortcut = {"label":title, "type":cfg.get("link_type","DocType"),
+                **({"url":link_to} if cfg.get("link_type") == "URL" else {"link_to":link_to})}
+            # Presentation options are written only when the installed schema has them.
+            for option in ("color", "doc_view"):
+                if cfg.get(option): shortcut[option] = cfg[option]
+            refs["shortcuts"].append(shortcut)
         elif kind in ("chart","number_card","quick_list"):
             key = {"chart":"chart_name","number_card":"number_card_name","quick_list":"quick_list_name"}[kind]
             name = cfg.get(key)
@@ -118,6 +124,10 @@ def workspace_blocks(design):
             frappe.throw(_("Unsupported native workspace component: {0}").format(kind))
         blocks.append({"id":component.get("id") or frappe.generate_hash(length=10),"type":typ,"data":data})
     return blocks, refs
+
+def role_targets(name):
+    return frappe.get_all("Studio Assignment", filters={"studio_workspace": name, "target_type": "Role", "enabled": 1},
+                          pluck="target_name", order_by="priority asc, creation asc")
 
 def publish_workspace(studio, capture_before, capture_after):
     design = json_value(studio.layout_json)
@@ -141,7 +151,7 @@ def publish_workspace(studio, capture_before, capture_after):
     put(doc, ["content"], json.dumps(blocks), required=True)
     aliases = {"shortcuts":["shortcuts"],"charts":["charts"],"number_cards":["number_cards"],"quick_lists":["quick_lists"]}
     ref_fields = {
-        "shortcuts":{"label":["label"],"type":["type"],"link_to":["link_to"],"url":["url"]},
+        "shortcuts":{"label":["label"],"type":["type"],"link_to":["link_to"],"url":["url"],"color":["color"],"doc_view":["doc_view"]},
         "charts":{"chart_name":["chart_name"]},
         "number_cards":{"number_card_name":["number_card_name"]},
         "quick_lists":{"quick_list_name":["quick_list_name"]}
@@ -155,7 +165,13 @@ def publish_workspace(studio, capture_before, capture_after):
                 ref_fields[key] = {"document_type":["document_type"], "label":["label"]}
         table = choose("Workspace", aliases[key],table=True,required=bool(rows))
         if table:
-            set_child_rows(doc, table, rows, ref_fields[key])
+            set_child_rows(doc, table, rows, ref_fields[key], optional=("color", "doc_view"))
+    if getattr(studio, "scope", None) == "Role":
+        # Native Workspace role rows are Frappe's own visibility rule for the workspace.
+        roles = role_targets(studio.name)
+        if not roles: frappe.throw(_("Role-scoped designs need at least one enabled Role"))
+        role_table = choose("Workspace", ["roles"], table=True, required=True)
+        set_child_rows(doc, role_table, [{"role": role} for role in roles], {"role": ["role"]})
     before = capture("Workspace", target) if existed else None
     saved = write(doc)
     capture_before.append(before or {"doctype":"Workspace","name":saved,"existed":False})
@@ -314,7 +330,15 @@ def designer_capabilities():
     desktop_types = link_types("Desktop Icon")
     if "icon_type" in fields("Desktop Icon"):
         desktop_types = ["Workspace" if value == "Workspace Sidebar" else value for value in desktop_types]
+    shortcut = fields("Workspace Shortcut")
+    def options(field):
+        return [x for x in (field.options or "").split("\n") if x] if field is not None and field.fieldtype == "Select" else []
+    workspace = fields("Workspace")
     return {"sidebar_doctype": dt, "sidebar_indent": bool(indent and indent.fieldtype == "Int"),
+            "shortcut_colors": options(shortcut.get("color")),
+            "shortcut_views": options(shortcut.get("doc_view")),
+            "workspace_roles": bool(workspace.get("roles") and workspace["roles"].fieldtype == "Table"),
+            "assignment_targets": [x for x in ("Role", "User", "Department", "Company") if available(x)],
             "link_types": {"workspace": link_types("Workspace Shortcut"),
                            "sidebar": link_types(dt, ["items", "sidebar_items", "links", "entries"]) if dt else [],
                            "dock": link_types("Dock", ["items", "entries", "dock_items", "links"]),
