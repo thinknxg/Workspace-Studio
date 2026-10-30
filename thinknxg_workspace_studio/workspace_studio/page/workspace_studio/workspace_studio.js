@@ -37,22 +37,27 @@ frappe.pages['workspace-studio'].on_page_load = (wrapper) => {
         root.find('#wss-properties').html(c ?
           `<label>Title</label><input id="wss-prop-title" class="form-control" value="${escape(c.title)}">
            <label>Description</label><textarea id="wss-prop-desc" class="form-control">${escape(c.description)}</textarea>
+           ${c.type === 'shortcut' ? `<label>Link Type</label><select id="wss-prop-link-type" class="form-control"><option value="DocType" ${c.config?.link_type === 'DocType' ? 'selected' : ''}>DocType</option><option value="Page" ${c.config?.link_type === 'Page' ? 'selected' : ''}>Page</option><option value="Report" ${c.config?.link_type === 'Report' ? 'selected' : ''}>Report</option></select><label>Link To (required)</label><input id="wss-prop-link-to" class="form-control" placeholder="e.g. Sales Order" value="${escape(c.config?.link_to || '')}">` : ''}
            <label>Config JSON</label><textarea id="wss-prop-json" class="form-control" rows="8">${escape(JSON.stringify(c.config||{},null,2))}</textarea>` :
           'Select a component');
     }
     root.on('click','.wss-palette-item',function(){
-        design.components.push({id:frappe.utils.get_random(10),type:$(this).data('type'),title:$(this).data('type'),description:'',config:{}});
+        design.components.push({id:frappe.utils.get_random(10),type:$(this).data('type'),title:$(this).data('type'),description:'',config:$(this).data('type') === 'shortcut' ? {link_type:'DocType',link_to:''} : {}});
         selected=design.components.length-1;render();
     });
     root.on('click','.wss-block',function(){selected=Number($(this).data('index'));render();});
     root.on('click','.wss-delete',function(e){e.stopPropagation();design.components.splice(Number($(this).data('index')),1);selected=null;render();});
-    root.on('change','#wss-prop-title, #wss-prop-desc, #wss-prop-json',function(){
+    root.on('change','#wss-prop-title, #wss-prop-desc, #wss-prop-json, #wss-prop-link-to, #wss-prop-link-type',function(){
         if(selected===null)return;
         const c=design.components[selected];
         try{
             c.title=root.find('#wss-prop-title').val();
             c.description=root.find('#wss-prop-desc').val();
             c.config=JSON.parse(root.find('#wss-prop-json').val());
+            if(c.type === 'shortcut') {
+                if(this.id === 'wss-prop-link-to') c.config.link_to = String($(this).val() || '').trim();
+                if(this.id === 'wss-prop-link-type') c.config.link_type = $(this).val();
+            }
         }catch(e){frappe.msgprint(__('Invalid component JSON'));return;}
         render();
     });
@@ -88,7 +93,13 @@ frappe.pages['workspace-studio'].on_page_load = (wrapper) => {
         root.find('#wss-dock').val(d.dock_json||'{}');
         selected=null;render();
     });
+    function validateShortcuts() {
+        const invalid = design.components.find(c => c.type === 'shortcut' && !String(c.config?.link_to || '').trim());
+        if(invalid) { frappe.msgprint(__('Shortcut "{0}" requires a Link To target (e.g. Sales Order). Select the shortcut and fill Link To in Properties.', [invalid.title || 'Untitled'])); return false; }
+        return true;
+    }
     root.find('#wss-save').on('click',async()=>{
+        if(!validateShortcuts()) return;
         const response=await call('save_design',{
             name:current,title:root.find('#wss-title').val(),
             module:root.find('#wss-module').val(),
@@ -99,6 +110,7 @@ frappe.pages['workspace-studio'].on_page_load = (wrapper) => {
     });
     root.find('#wss-publish').on('click',()=>{
         if(!current){frappe.msgprint(__('Save the design first'));return;}
+        if(!validateShortcuts()) return;
         frappe.prompt([{fieldtype:'Small Text',fieldname:'note',label:'Publish note',reqd:1}],
             async values=>{const result=await call('publish',{name:current,note:values.note});
                 frappe.msgprint(__('Published workspace {0}. Backup version: {1}',[result.workspace,result.version]));},
