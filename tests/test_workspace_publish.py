@@ -90,5 +90,27 @@ class WorkspacePublishTests(unittest.TestCase):
         self.assertEqual(self.doc.title, "Estimation")
 
 
+
+    def test_restore_keeps_current_lock_timestamp(self):
+        self.doc.name = "Existing"
+        self.doc.modified = "current"
+        self.doc.update = lambda values: self.doc.__dict__.update(values)
+        self.doc.get_all_children = lambda: []
+        def saved(**kwargs):
+            self.assertEqual(self.doc.modified, "current")
+            self.assertEqual(self.doc.title, "Restored")
+        self.doc.save.side_effect = saved
+        self.native.restore({"doctype":"Workspace","name":"Existing","existed":True,"document":{"modified":"old","title":"Restored"}})
+        self.doc.save.assert_called_once_with(ignore_permissions=True)
+
+    def test_restore_marks_deleted_child_rows_for_insertion(self):
+        self.doc.name = "Existing"
+        self.doc.modified = "current"
+        self.doc.update = lambda values: self.doc.__dict__.update(values)
+        child = types.SimpleNamespace(doctype="Workspace Shortcut", name="deleted-row", set=Mock())
+        self.doc.get_all_children = lambda: [child]
+        self.native.restore({"doctype":"Workspace","name":"Existing","existed":True,"document":{"modified":"old"}})
+        child.set.assert_called_once_with("__islocal", True)
+
 if __name__ == "__main__":
     unittest.main()

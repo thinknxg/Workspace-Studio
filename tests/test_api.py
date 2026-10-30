@@ -118,4 +118,24 @@ class ApiTests(unittest.TestCase):
         self.native.publish.assert_not_called()
         self.frappe.db.savepoint.assert_not_called()
 
+
+    def test_rollback_clears_deleted_native_workspace_target(self):
+        self.studio.target_workspace='New Native Workspace'
+        self.frappe.db.exists.return_value=False
+        self.native.restore=Mock()
+        version=types.SimpleNamespace(name='version',studio_workspace='design',snapshot_json=json.dumps({'native':{'before':[{'doctype':'Workspace','name':'New Native Workspace','existed':False}],'after':[]}}))
+        self.frappe.get_doc=lambda dt,name:version if dt=='Studio Version' else self.studio
+        self.api.rollback('version')
+        self.assertIsNone(self.studio.target_workspace)
+        self.studio.save.assert_called_once_with(ignore_permissions=True)
+
+    def test_rollback_retains_existing_native_workspace_target(self):
+        self.studio.target_workspace='Existing'
+        self.frappe.db.exists.return_value=True
+        self.native.restore=Mock()
+        version=types.SimpleNamespace(name='version',studio_workspace='design',snapshot_json=json.dumps({'native':{'before':[],'after':[]}}))
+        self.frappe.get_doc=lambda dt,name:version if dt=='Studio Version' else self.studio
+        self.api.rollback('version')
+        self.assertEqual(self.studio.target_workspace,'Existing')
+
 if __name__=='__main__':unittest.main()
