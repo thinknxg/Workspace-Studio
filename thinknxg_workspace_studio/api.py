@@ -41,6 +41,14 @@ def load(name):
     guard()
     return frappe.get_doc("Studio Workspace",name).as_dict()
 
+def require_module(value):
+    module = value.strip() if isinstance(value, str) else ""
+    if not module:
+        frappe.throw(_("Select a Module in Workspace Studio before saving or publishing."))
+    if not frappe.db.exists("Module Def", module):
+        frappe.throw(_("The selected Module is unavailable. Choose an existing Module in Workspace Studio."))
+    return module
+
 @frappe.whitelist()
 def save_design(name=None,title=None,module=None,layout=None,navigation=None,dock=None,target_workspace=None,scope="Global"):
     guard()
@@ -57,8 +65,9 @@ def save_design(name=None,title=None,module=None,layout=None,navigation=None,doc
         if not title: frappe.throw(_("Title required"))
         doc=frappe.new_doc("Studio Workspace")
         doc.workspace_key=frappe.scrub(title)+"_"+frappe.generate_hash(length=6)
+    selected_module = require_module(module if module is not None else doc.module_name)
     doc.workspace_title=title or doc.workspace_title
-    doc.module_name=module if module is not None else doc.module_name
+    doc.module_name=selected_module
     doc.scope=scope
     doc.target_workspace=target_workspace or None
     doc.layout_json=json.dumps(design,ensure_ascii=False)
@@ -77,6 +86,7 @@ def publish(name,note=None):
     if frappe.get_single("Studio Settings").require_publish_note and not (note or "").strip():
         frappe.throw(_("Publication note required"))
     studio=frappe.get_doc("Studio Workspace",name)
+    require_module(studio.module_name)
     payload = design_payload(studio)
     errors = validate_design(payload["layout"], payload["navigation"], payload["dock"], strict=True)
     if errors: frappe.throw("; ".join(errors))

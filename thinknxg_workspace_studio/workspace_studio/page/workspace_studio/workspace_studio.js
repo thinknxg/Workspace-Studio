@@ -1,6 +1,9 @@
 frappe.pages['workspace-studio'].on_page_load = async wrapper => {
     frappe.ui.make_app_page({parent:wrapper,title:__('Workspace Studio'),single_column:true});
-    await frappe.require('/assets/thinknxg_workspace_studio/js/designer_model.js');
+    await frappe.require([
+        '/assets/thinknxg_workspace_studio/css/workspace_studio.css',
+        '/assets/thinknxg_workspace_studio/js/designer_model.js'
+    ]);
     const M = window.WorkspaceStudioModel, root = $(wrapper).find('.layout-main-section');
     const esc = x => frappe.utils.escape_html(String(x ?? ''));
     const call = async (method,args={}) => (await frappe.call({method:'thinknxg_workspace_studio.api.'+method,args})).message;
@@ -12,7 +15,7 @@ frappe.pages['workspace-studio'].on_page_load = async wrapper => {
         <button class="btn btn-default" id="wss-validate">Validate</button>
         <button class="btn btn-default" id="wss-publish" disabled>Publish</button>
         <button class="btn btn-primary" id="wss-save" disabled>Save</button></div></div>
-        <div class="wss-fields"><label>Workspace title<input id="wss-title" class="form-control"></label><label>Module<select id="wss-module" class="form-control"></select></label><label>Native workspace<select id="wss-target" class="form-control"></select></label><label>Studio design<select id="wss-existing" class="form-control"></select></label></div>
+        <div class="wss-fields"><label>Workspace title<input id="wss-title" class="form-control"></label><label>Module (required)<select id="wss-module" class="form-control" required aria-required="true"></select></label><label>Native workspace<select id="wss-target" class="form-control"></select></label><label>Studio design<select id="wss-existing" class="form-control"></select></label></div>
         <nav class="wss-tabs" aria-label="Design surface">${Object.entries(labels).map(([key,label])=>`<button class="btn btn-default" data-surface="${key}">${label}</button>`).join('')}</nav>
         <div id="wss-errors" role="alert"></div><div class="wss-layout"><aside class="wss-panel wss-edit"><h4>Components</h4><p>Drag onto the canvas, or click to add.</p><div id="wss-palette"></div><div id="wss-surface-options"></div></aside><main class="wss-panel"><h4 id="wss-canvas-title"></h4><p id="wss-help"></p><div id="wss-canvas" class="wss-canvas"></div></main><aside class="wss-panel wss-edit"><h4>Properties</h4><div id="wss-properties"></div></aside></div>`);
     const list = (create=false) => M.rows(state,surface,create);
@@ -20,7 +23,10 @@ frappe.pages['workspace-studio'].on_page_load = async wrapper => {
     function errors() {
         const result=M.validate(state);
         if (!String(root.find('#wss-title').val() || '').trim()) result.unshift('Workspace title required');
-        if (state.navigation.items && !root.find('#wss-module').val()) result.push('Sidebar requires a module');
+        const module=root.find('#wss-module').val();
+        if (!module) result.push('Select a Module before saving or publishing.');
+        else if (!boot.modules.includes(module)) result.push('The saved Module is unavailable. Choose an existing Module.');
+        root.find('#wss-module').attr('aria-invalid', !module || !boot.modules.includes(module) ? 'true' : 'false');
         root.find('#wss-errors').html(result.length ? '<ul>'+result.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>' : '');
         return result;
     }
@@ -142,10 +148,17 @@ frappe.pages['workspace-studio'].on_page_load = async wrapper => {
     root.find('#wss-validate').on('click',()=>{if(!errors().length)frappe.show_alert({message:__('Design is valid locally; native schema checks run at publish.'),indicator:'green'});});
     root.find('#wss-title,#wss-module,#wss-target').on('change',changed);
     function working(action){return async()=>{if(busy)return;busy=true;root.find('button,input,select,textarea').prop('disabled',true);try{await action();}catch(e){frappe.msgprint(esc(e.message || 'Operation failed'));}finally{busy=false;root.find('button,input,select,textarea').prop('disabled',false);root.find('#wss-publish').prop('disabled',!boot?.can_publish);}};}
+    function setModule(value) {
+        const el=root.find('#wss-module');
+        if(value && !el.find('option').toArray().some(option=>option.value===value)) el.append($('<option></option>').val(value).text(value+' (unavailable)'));
+        el.val(value || '');
+    }
     async function refresh() {
         boot=await call('bootstrap');
         const options=(id,rows,first)=>{const el=root.find(id),value=el.val();el.empty().append($('<option value=""></option>').text(first));rows.forEach(([key,label])=>el.append($('<option></option>').val(key).text(label)));el.val(value);};
+        const module=root.find('#wss-module').val();
         options('#wss-module',boot.modules.map(x=>[x,x]),'Choose module');
+        setModule(module);
         options('#wss-target',boot.native_workspaces.map(x=>[x.name,x.title||x.name]),'Create new workspace');
         options('#wss-existing',boot.studio_workspaces.map(x=>[x.name,x.workspace_title]),'New Studio design');
         root.find('#wss-existing').val(current || '');
@@ -162,7 +175,7 @@ frappe.pages['workspace-studio'].on_page_load = async wrapper => {
         const doc=next?await call('load',{name:next}):{};
         const loaded=M.load(doc); // Parse before replacing the active design.
         state=loaded;current=next;scope=doc.scope || 'Global';selected=null;dirty=false;
-        root.find('#wss-title').val(doc.workspace_title || '');root.find('#wss-module').val(doc.module_name || '');root.find('#wss-target').val(doc.target_workspace || '');root.find('#wss-status').text(next?'Loaded':'New design');root.find('#wss-errors').empty();render();
+        root.find('#wss-title').val(doc.workspace_title || '');setModule(doc.module_name || '');root.find('#wss-target').val(doc.target_workspace || '');root.find('#wss-status').text(next?'Loaded':'New design');root.find('#wss-errors').empty();render();
     }));
     // The note callback saves the exact visible design before invoking the existing guarded publisher.
     root.find('#wss-publish').on('click',()=>{

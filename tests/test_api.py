@@ -1,3 +1,4 @@
+import json
 import importlib.util
 from pathlib import Path
 import sys
@@ -19,7 +20,11 @@ class ApiTests(unittest.TestCase):
         def throw(message, error=ValueError): raise error(message)
         self.frappe.throw=throw
         self.frappe.get_single=lambda dt:types.SimpleNamespace(enable_guarded_publish=True,require_publish_note=True)
+        self.frappe.parse_json=json.loads
+        self.frappe.scrub=lambda value:value.lower()
+        self.frappe.generate_hash=lambda **kwargs:"abcdef"
         self.frappe.db=Mock()
+        self.frappe.db.exists.return_value=True
         self.frappe.session=types.SimpleNamespace(user='Administrator')
         self.frappe.clear_cache=Mock()
         utils=types.ModuleType('frappe.utils');utils.now_datetime=lambda:'2026-10-30'
@@ -30,6 +35,7 @@ class ApiTests(unittest.TestCase):
             self.api=importlib.util.module_from_spec(spec);spec.loader.exec_module(self.api)
         self.studio=types.SimpleNamespace(name='design',module_name='Selling',save=Mock())
         self.frappe.get_doc=lambda *args:self.studio
+        self.frappe.new_doc=lambda *args:self.studio
         self.api.design_payload=lambda doc:{'layout':{'components':[]},'navigation':{},'dock':{}}
         self.api.snapshot=Mock(return_value=types.SimpleNamespace(name='backup'))
 
@@ -67,5 +73,49 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.studio.status,'Published')
         self.assertEqual(self.api.snapshot.call_args.args[3]['native'],payload)
         self.frappe.db.rollback.assert_not_called()
+
+
+    def test_new_save_without_module_is_rejected_before_save(self):
+        for value in (None, '', '   '):
+            with self.subTest(module=value):
+                self.studio.module_name=None
+                with self.assertRaisesRegex(ValueError, 'Select a Module'):
+                    self.api.save_design(title='Orders',module=value)
+        self.studio.save.assert_not_called()
+        self.api.snapshot.assert_not_called()
+
+    def test_save_with_unavailable_module_is_rejected(self):
+        self.frappe.db.exists.return_value=False
+        with self.assertRaisesRegex(ValueError, 'selected Module is unavailable'):
+            self.api.save_design(name='design',title='Orders',module='Removed')
+        self.assertEqual(self.studio.module_name,'Selling')
+        self.studio.save.assert_not_called()
+        self.api.snapshot.assert_not_called()
+
+    def test_existing_save_omitting_module_retains_saved_module(self):
+        self.api.save_design(name='design',title='Orders')
+        self.assertEqual(self.studio.module_name,'Selling')
+        self.frappe.db.exists.assert_called_once_with('Module Def','Selling')
+        self.studio.save.assert_called_once_with(ignore_permissions=True)
+
+    def test_explicit_blank_module_cannot_erase_existing_module(self):
+        with self.assertRaisesRegex(ValueError,'Select a Module'):
+            self.api.save_design(name='design',title='Orders',module='')
+        self.assertEqual(self.studio.module_name,'Selling')
+        self.studio.save.assert_not_called()
+
+    def test_new_save_normalizes_and_records_valid_module(self):
+        result=self.api.save_design(title='Orders',module=' Selling ')
+        self.assertEqual(self.studio.module_name,'Selling')
+        self.assertEqual(result['name'],'design')
+        self.frappe.db.exists.assert_called_once_with('Module Def','Selling')
+        self.api.snapshot.assert_called_once()
+
+    def test_publish_of_legacy_missing_module_stops_before_native_writes(self):
+        self.studio.module_name=None
+        with self.assertRaisesRegex(ValueError,'Select a Module'):
+            self.api.publish('design','Reviewed')
+        self.native.publish.assert_not_called()
+        self.frappe.db.savepoint.assert_not_called()
 
 if __name__=='__main__':unittest.main()

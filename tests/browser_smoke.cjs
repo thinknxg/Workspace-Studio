@@ -12,10 +12,24 @@ const root=path.join(__dirname,'..');
  await page.setContent('<div id="wrapper"><div class="layout-main-section"></div></div>');
  const jquery=process.env.JQUERY_PATH || require.resolve('jquery/dist/jquery.min.js');
  for(const file of [jquery,path.join(__dirname,'frappe_mock.js'),path.join(root,'thinknxg_workspace_studio/public/js/designer_model.js'),path.join(root,'thinknxg_workspace_studio/workspace_studio/page/workspace_studio/workspace_studio.js')])await page.addScriptTag({content:await fs.readFile(file,'utf8')});
- await page.addStyleTag({content:await fs.readFile(path.join(root,'thinknxg_workspace_studio/public/css/workspace_studio.css'),'utf8')});
+ await page.evaluate(css=>window.__designerCss=css,await fs.readFile(path.join(root,'thinknxg_workspace_studio/public/css/workspace_studio.css'),'utf8'));
  await page.evaluate(()=>frappe.pages['workspace-studio'].on_page_load(document.querySelector('#wrapper')));
+ const requestedAssets=await page.evaluate(()=>__assets);
+ assert.ok(requestedAssets.includes('/assets/thinknxg_workspace_studio/css/workspace_studio.css'));
+ const panels=await page.locator('.wss-layout').evaluate(el=>Array.from(el.children).map(x=>{const r=x.getBoundingClientRect();return {x:r.x,y:r.y};}));
+ assert.equal(panels[0].y,panels[1].y);assert.equal(panels[1].y,panels[2].y);
+ assert.ok(panels[0].x<panels[1].x && panels[1].x<panels[2].x);
+ await page.setViewportSize({width:640,height:900});
+ const mobile=await page.locator('.wss-layout').evaluate(el=>Array.from(el.children).map(x=>x.getBoundingClientRect().y));
+ assert.ok(mobile[0]<mobile[1] && mobile[1]<mobile[2]);
+ await page.setViewportSize({width:1440,height:1000});
  async function fill(label,value){const el=page.locator('[data-field="'+label+'"]');await el.fill(value);await el.dispatchEvent('change');}
- await page.locator('#wss-title').fill('Sales Operations');await page.locator('#wss-module').selectOption('Selling');
+ await page.locator('#wss-title').fill('Sales Operations');
+ await page.locator('#wss-save').click();
+ await page.waitForFunction(()=>!document.querySelector('#wss-save').disabled);
+ assert.match(await page.locator('#wss-errors').textContent(),/Select a Module/);
+ assert.equal(await page.evaluate(()=>__calls.filter(c=>c.key==='save_design').length),0);
+ await page.locator('#wss-module').selectOption('Selling');
  await page.locator('[data-type="heading"]').click();await fill('Title','Quick Access');
  await page.locator('[data-type="shortcut"]').click();await fill('Title','Sales Orders');await fill('Destination','Sales Order');
  await page.locator('[data-type="chart"]').click();await fill('Dashboard Chart','Sales Trends');
@@ -27,6 +41,8 @@ const root=path.join(__dirname,'..');
  await page.locator('#wss-publish').click();await page.waitForFunction(()=>__calls.some(c=>c.key==='publish'));
  const saved=await page.evaluate(()=>({calls:__calls.map(c=>c.key),data:__saved}));
  assert.deepEqual(saved.calls,['bootstrap','save_design','bootstrap','publish']);
+ assert.equal(saved.data.module,'Selling');
+ assert.equal(await page.locator('#wss-module').inputValue(),'Selling');
  assert.equal(JSON.parse(saved.data.layout).components[1].config.link_to,'Sales Order');
  assert.equal(JSON.parse(saved.data.navigation).items[1].indent,1);
  assert.equal(JSON.parse(saved.data.dock).entries[0].link_type,'Workspace');
@@ -43,10 +59,17 @@ const root=path.join(__dirname,'..');
  await page.locator('#wss-existing').selectOption('studio-test');await page.waitForFunction(()=>document.querySelectorAll('.wss-block').length===5);
  // Changed scope and unknown keys survive loading and resaving.
  await page.locator('#wss-save').click();await page.waitForFunction(()=>__calls.filter(c=>c.key==='save_design').length===3);assert.equal(await page.evaluate(()=>__saved.scope),'Role');
+ // A module removed from bootstrap metadata remains visible instead of silently clearing.
+ await page.evaluate(()=>window.__modules=[]);
+ await page.locator('#wss-save').click();await page.waitForFunction(()=>__calls.filter(c=>c.key==='save_design').length===4);
+ assert.equal(await page.locator('#wss-module').inputValue(),'Selling');
+ await page.locator('#wss-save').click();await page.waitForFunction(()=>!document.querySelector('#wss-save').disabled);
+ assert.match(await page.locator('#wss-errors').textContent(),/Module is unavailable/);
+ assert.equal(await page.evaluate(()=>__calls.filter(c=>c.key==='save_design').length),4);
  // Incomplete components block publishing before a request is sent.
  await page.locator('[data-type="shortcut"]').click();await page.locator('#wss-publish').click();assert.equal(await page.evaluate(()=>__calls.filter(c=>c.key==='publish').length),1);assert.match(await page.locator('#wss-errors').textContent(),/destination/);
  // Installed schema controls disable unsupported nesting and link types.
  assert.deepEqual(errors,[]);
- console.log('PASS browser smoke: four surfaces, pickers, nested order, native drag/drop, preview, reload, scope, validation, save-before-publish');
+ console.log('PASS browser smoke: four surfaces, pickers, nested order, native drag/drop, preview, reload, scope, validation, module checks, desktop/mobile layout, save-before-publish');
  } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
