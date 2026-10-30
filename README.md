@@ -74,3 +74,9 @@ Browser smoke test: install `playwright` and `jquery@3.7.1` in your development 
 - Inject an incompatible schema mapping and verify no partial native changes commit.
 
 No server deployment or production certification is included.
+
+### Module selection and editor layout
+
+Choose an existing **Module** before Save or Publish. Missing or deleted modules are rejected before writes with an actionable message. When older API callers omit the module on an existing design, its saved module is retained. A removed module stays visible in the selector for correction rather than silently clearing. No Studio DocType schema change is required.
+
+The page explicitly loads its designer stylesheet as well as its state model. At desktop widths Components, Canvas and Properties appear side by side; medium widths move Properties below, and narrow screens stack the panels. If an older cached page still appears unstyled after updating the code, rebuild the app assets, clear the site cache and hard-refresh Desk.
