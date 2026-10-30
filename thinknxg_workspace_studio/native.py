@@ -114,7 +114,13 @@ def publish_workspace(studio, capture_before, capture_after):
         frappe.throw(_("Specified Workspace does not exist: {0}").format(target))
     doc = frappe.get_doc("Workspace", target) if existed else frappe.new_doc("Workspace")
     if not existed:
-        put(doc, ["label","title"], studio.workspace_title, required=True)
+        title = (studio.workspace_title or "").strip()
+        if not title:
+            frappe.throw(_("Workspace title required"))
+        # v16 has both fields: label names the document, title is validated separately.
+        # Retain compatibility with schemas that expose only one of them.
+        put(doc, ["title", "label"], title, required=True)
+        put(doc, ["label"], title)
         put(doc, ["module"], studio.module_name)
         put(doc, ["public"], 1)
     put(doc, ["icon"], studio.icon or "layout-dashboard")
