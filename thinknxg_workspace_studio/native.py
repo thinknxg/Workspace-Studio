@@ -47,7 +47,11 @@ def restore(snapshot):
     data = copy.deepcopy(snapshot["document"])
     if frappe.db.exists(dt, name):
         current = frappe.get_doc(dt, name)
+        current_modified = current.modified
         current.update(data)
+        # Restore content, not the old optimistic-lock timestamp. The API already
+        # checked the published snapshot against the current native document.
+        current.modified = current_modified
         # Publication replaces child rows. A snapshot may name rows that were
         # deleted by that replacement; db_update would silently update no row.
         # Mark only missing children for insertion, retaining snapshot identities.
