@@ -59,19 +59,28 @@
       "fieldname": "layout_json",
       "label": "Layout JSON",
       "fieldtype": "Code",
-      "options": "JSON"
+      "options": "JSON",
+      "hidden": 1,
+      "read_only": 1,
+      "description": "Managed by the Workspace Studio visual designer."
     },
     {
       "fieldname": "navigation_json",
       "label": "Navigation JSON",
       "fieldtype": "Code",
-      "options": "JSON"
+      "options": "JSON",
+      "hidden": 1,
+      "read_only": 1,
+      "description": "Managed by the Workspace Studio visual designer."
     },
     {
       "fieldname": "dock_json",
       "label": "Dock JSON",
       "fieldtype": "Code",
-      "options": "JSON"
+      "options": "JSON",
+      "hidden": 1,
+      "read_only": 1,
+      "description": "Managed by the Workspace Studio visual designer."
     },
     {
       "fieldname": "last_published_on",

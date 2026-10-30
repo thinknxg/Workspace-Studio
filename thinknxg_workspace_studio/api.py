@@ -19,9 +19,38 @@ def snapshot(studio,action,summary,payload):
         "snapshot_json":json.dumps(payload,default=str,ensure_ascii=False)
     }).insert(ignore_permissions=True)
 
+ASSIGNMENT_TYPES=("Role","User","Department","Company")
+SCOPES=("Global",)+ASSIGNMENT_TYPES
+
+def assignments_for(name):
+    if not name: return []
+    return frappe.get_all("Studio Assignment",filters={"studio_workspace":name},
+        fields=["target_type","target_name","enabled","priority"],order_by="priority asc, creation asc")
+
+def clean_assignments(value):
+    """Validate audience rows before any write. Targets must be real documents."""
+    rows=frappe.parse_json(value) if isinstance(value,str) else value
+    if not isinstance(rows,list) or len(rows)>500:
+        frappe.throw(_("Audience must be a list of at most 500 entries"))
+    cleaned=[]; seen=set()
+    for index,row in enumerate(rows,1):
+        if not isinstance(row,dict): frappe.throw(_("Audience entry {0} must be an object").format(index))
+        kind=row.get("target_type"); target=str(row.get("target_name") or "").strip()
+        if kind not in ASSIGNMENT_TYPES: frappe.throw(_("Audience entry {0}: unsupported target type").format(index))
+        if not target: frappe.throw(_("Audience entry {0}: choose a {1}").format(index,kind))
+        if not frappe.db.exists("DocType",kind): frappe.throw(_("Audience entry {0}: {1} is not installed on this site").format(index,kind))
+        if not frappe.db.exists(kind,target): frappe.throw(_("Audience entry {0}: {1} {2} does not exist").format(index,kind,target))
+        if (kind,target) in seen: continue
+        seen.add((kind,target))
+        try: priority=int(row.get("priority") if row.get("priority") is not None else 100)
+        except (TypeError,ValueError): frappe.throw(_("Audience entry {0}: priority must be a whole number").format(index))
+        cleaned.append({"target_type":kind,"target_name":target,"enabled":1 if int(row.get("enabled",1) or 0) else 0,"priority":priority})
+    return cleaned
+
 def design_payload(doc):
     return {"title":doc.workspace_title,"module":doc.module_name,"icon":doc.icon,
             "scope":doc.scope,"target_workspace":doc.target_workspace,
+            "assignments":assignments_for(doc.name),
             "layout":frappe.parse_json(doc.layout_json or "{}"),
             "navigation":frappe.parse_json(doc.navigation_json or "{}"),
             "dock":frappe.parse_json(doc.dock_json or "{}")}
@@ -39,7 +68,9 @@ def bootstrap():
 @frappe.whitelist()
 def load(name):
     guard()
-    return frappe.get_doc("Studio Workspace",name).as_dict()
+    data=frappe.get_doc("Studio Workspace",name).as_dict()
+    data["assignments"]=assignments_for(name)
+    return data
 
 def require_module(value):
     module = value.strip() if isinstance(value, str) else ""
@@ -50,8 +81,10 @@ def require_module(value):
     return module
 
 @frappe.whitelist()
-def save_design(name=None,title=None,module=None,layout=None,navigation=None,dock=None,target_workspace=None,scope="Global"):
+def save_design(name=None,title=None,module=None,layout=None,navigation=None,dock=None,target_workspace=None,scope="Global",icon=None,assignments=None):
     guard()
+    if scope not in SCOPES: frappe.throw(_("Unsupported scope: {0}").format(scope))
+    audience=clean_assignments(assignments) if assignments is not None else None
     design=frappe.parse_json(layout or '{"components":[]}')
     if not isinstance(design,dict) or not isinstance(design.get("components"),list):
         frappe.throw(_("Layout must include a components list"))
@@ -69,12 +102,18 @@ def save_design(name=None,title=None,module=None,layout=None,navigation=None,doc
     doc.workspace_title=title or doc.workspace_title
     doc.module_name=selected_module
     doc.scope=scope
+    if icon is not None: doc.icon=(icon or "").strip() or None
     doc.target_workspace=target_workspace or None
     doc.layout_json=json.dumps(design,ensure_ascii=False)
     if navigation is not None: doc.navigation_json=json.dumps(frappe.parse_json(navigation),ensure_ascii=False)
     if dock is not None: doc.dock_json=json.dumps(frappe.parse_json(dock),ensure_ascii=False)
     doc.status="Draft"
     doc.save(ignore_permissions=True)
+    if audience is not None:
+        # Audience rows are replaced as a set, in the same request transaction.
+        frappe.db.delete("Studio Assignment",{"studio_workspace":doc.name})
+        for row in audience:
+            frappe.get_doc({"doctype":"Studio Assignment","studio_workspace":doc.name,**row}).insert(ignore_permissions=True)
     snapshot(doc,"Saved","Design updated",{"studio":design_payload(doc)})
     return {"name":doc.name,"status":doc.status}
 
@@ -90,6 +129,8 @@ def publish(name,note=None):
     payload = design_payload(studio)
     errors = validate_design(payload["layout"], payload["navigation"], payload["dock"], strict=True)
     if errors: frappe.throw("; ".join(errors))
+    if getattr(studio,"scope",None)=="Role" and not native.role_targets(studio.name):
+        frappe.throw(_("Role-scoped designs need at least one enabled Role in the Audience panel before publishing"))
     if "items" in payload["navigation"] and not studio.module_name:
         frappe.throw(_("Sidebar requires a module"))
     # All native updates, snapshots and status changes commit together or roll back.

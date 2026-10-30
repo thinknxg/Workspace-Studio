@@ -60,6 +60,25 @@ class NativeAdapterTests(unittest.TestCase):
             blocks,refs=self.native.workspace_blocks({'components':[{'type':kind,'config':{key:'Sales'}}]})
             self.assertEqual(blocks[0]['data'][key],'Sales')
 
+    def test_shortcut_presentation_options_are_optional_native_fields(self):
+        blocks,refs=self.native.workspace_blocks({'components':[{'type':'shortcut','title':'Orders','config':{'link_to':'Sales Order','color':'Blue','doc_view':'Kanban'}}]})
+        self.assertEqual(refs['shortcuts'][0]['color'],'Blue');self.assertEqual(refs['shortcuts'][0]['doc_view'],'Kanban')
+        class Row(dict):
+            def set(self,k,v): self[k]=v
+        class Doc:
+            doctype='Workspace'
+            def __init__(self): self.rows=[]
+            def set(self,k,v): self.rows=list(v)
+            def append(self,k,v): r=Row(); self.rows.append(r); return r
+        doc=Doc()
+        schema={'shortcuts':types.SimpleNamespace(fieldtype='Table',options='Workspace Shortcut')}
+        child={k:types.SimpleNamespace(fieldtype='Data') for k in ('label','type','link_to')}
+        with patch.object(self.native,'fields',side_effect=lambda dt: schema if dt=='Workspace' else child):
+            self.native.set_child_rows(doc,'shortcuts',refs['shortcuts'],{'label':['label'],'type':['type'],'link_to':['link_to'],'color':['color'],'doc_view':['doc_view']},optional=('color','doc_view'))
+            self.assertEqual(doc.rows[0],{'label':'Orders','type':'DocType','link_to':'Sales Order'})
+            with self.assertRaises(ValueError):
+                self.native.set_child_rows(doc,'shortcuts',refs['shortcuts'],{'label':['label'],'type':['type'],'link_to':['link_to'],'color':['color']})
+
     def test_missing_shortcut_destination_fails(self):
         with self.assertRaises(ValueError):
             self.native.workspace_blocks({'components':[{'type':'shortcut','config':{}}]})

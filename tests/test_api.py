@@ -138,4 +138,43 @@ class ApiTests(unittest.TestCase):
         self.api.rollback('version')
         self.assertEqual(self.studio.target_workspace,'Existing')
 
+    def test_audience_is_validated_before_any_write(self):
+        for bad in ('{}', '[{"target_type":"Galaxy","target_name":"x"}]', '[{"target_type":"Role","target_name":" "}]'):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                self.api.save_design(name='design',title='Orders',module='Selling',assignments=bad)
+        self.frappe.db.exists.side_effect=lambda dt,name=None: dt!='Role'
+        with self.assertRaisesRegex(ValueError,'does not exist'):
+            self.api.save_design(name='design',title='Orders',module='Selling',assignments='[{"target_type":"Role","target_name":"Ghost"}]')
+        self.studio.save.assert_not_called()
+
+    def test_unsupported_scope_rejected(self):
+        with self.assertRaisesRegex(ValueError,'Unsupported scope'):
+            self.api.save_design(name='design',title='Orders',module='Selling',scope='Planet')
+        self.studio.save.assert_not_called()
+
+    def test_audience_rows_replace_existing_set_and_icon_saved(self):
+        inserted=[]
+        def get_doc(*args):
+            if args and isinstance(args[0],dict):
+                return types.SimpleNamespace(insert=lambda **kw:inserted.append(args[0]))
+            return self.studio
+        self.frappe.get_doc=get_doc
+        rows='[{"target_type":"Role","target_name":"Sales User"},{"target_type":"Role","target_name":"Sales User"},{"target_type":"User","target_name":"a@example.com","enabled":0,"priority":5}]'
+        self.api.save_design(name='design',title='Orders',module='Selling',scope='Role',icon=' sell ',assignments=rows)
+        self.frappe.db.delete.assert_called_once_with('Studio Assignment',{'studio_workspace':'design'})
+        self.assertEqual([(r['target_type'],r['target_name'],r['enabled']) for r in inserted],[('Role','Sales User',1),('User','a@example.com',0)])
+        self.assertEqual(self.studio.icon,'sell')
+        self.assertEqual(self.studio.scope,'Role')
+
+    def test_omitted_audience_leaves_rows_untouched(self):
+        self.api.save_design(name='design',title='Orders',module='Selling')
+        self.frappe.db.delete.assert_not_called()
+
+    def test_role_scope_without_roles_blocks_publish(self):
+        self.studio.scope='Role'
+        self.native.role_targets=Mock(return_value=[])
+        with self.assertRaisesRegex(ValueError,'at least one enabled Role'):
+            self.api.publish('design','note')
+        self.native.publish.assert_not_called();self.frappe.db.savepoint.assert_not_called()
+
 if __name__=='__main__':unittest.main()

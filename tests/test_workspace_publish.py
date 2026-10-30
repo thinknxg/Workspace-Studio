@@ -91,6 +91,36 @@ class WorkspacePublishTests(unittest.TestCase):
 
 
 
+    def test_role_scope_writes_native_workspace_roles(self):
+        self.schema["roles"] = types.SimpleNamespace(fieldtype="Table", options="Has Role")
+        self.studio.scope = "Role"; self.studio.name = "design"
+        self.frappe.get_all = Mock(return_value=["Sales User", "Sales Manager"])
+        captured = {}
+        def rows(doc, table, items, mapping, optional=()):
+            captured[table] = items
+        with patch.object(self.native, "set_child_rows", side_effect=rows):
+            self.publish()
+        self.assertEqual(captured["roles"], [{"role": "Sales User"}, {"role": "Sales Manager"}])
+        filters = self.frappe.get_all.call_args.kwargs["filters"]
+        self.assertEqual(filters, {"studio_workspace": "design", "target_type": "Role", "enabled": 1})
+
+    def test_global_scope_leaves_native_roles_alone(self):
+        self.schema["roles"] = types.SimpleNamespace(fieldtype="Table", options="Has Role")
+        self.studio.scope = "Global"
+        self.frappe.get_all = Mock()
+        with patch.object(self.native, "set_child_rows") as rows:
+            self.publish()
+        self.assertNotIn("roles", [call.args[1] for call in rows.call_args_list])
+        self.frappe.get_all.assert_not_called()
+
+    def test_role_scope_without_roles_fails_before_write(self):
+        self.schema["roles"] = types.SimpleNamespace(fieldtype="Table", options="Has Role")
+        self.studio.scope = "Role"; self.studio.name = "design"
+        self.frappe.get_all = Mock(return_value=[])
+        with self.assertRaisesRegex(ValueError, "at least one enabled Role"):
+            self.publish()
+        self.doc.insert.assert_not_called()
+
     def test_restore_keeps_current_lock_timestamp(self):
         self.doc.name = "Existing"
         self.doc.modified = "current"
