@@ -93,7 +93,8 @@ def workspace_blocks(design):
             link_to = cfg.get("link_to")
             if not link_to: frappe.throw(_("Shortcut requires config.link_to"))
             data["shortcut_name"] = title
-            refs["shortcuts"].append({"label":title, "type":cfg.get("link_type","DocType"),"link_to":link_to})
+            refs["shortcuts"].append({"label":title, "type":cfg.get("link_type","DocType"),
+                **({"url":link_to} if cfg.get("link_type") == "URL" else {"link_to":link_to})})
         elif kind in ("chart","number_card","quick_list"):
             key = {"chart":"chart_name","number_card":"number_card_name","quick_list":"quick_list_name"}[kind]
             name = cfg.get(key)
@@ -120,12 +121,18 @@ def publish_workspace(studio, capture_before, capture_after):
     put(doc, ["content"], json.dumps(blocks), required=True)
     aliases = {"shortcuts":["shortcuts"],"charts":["charts"],"number_cards":["number_cards"],"quick_lists":["quick_lists"]}
     ref_fields = {
-        "shortcuts":{"label":["label"],"type":["type"],"link_to":["link_to"]},
+        "shortcuts":{"label":["label"],"type":["type"],"link_to":["link_to"],"url":["url"]},
         "charts":{"chart_name":["chart_name"]},
         "number_cards":{"number_card_name":["number_card_name"]},
         "quick_lists":{"quick_list_name":["quick_list_name"]}
     }
     for key, rows in refs.items():
+        if key == "quick_lists" and rows:
+            quick_table = choose("Workspace", ["quick_lists"], table=True, required=True)
+            quick_fields = fields(fields("Workspace")[quick_table].options)
+            if "quick_list_name" not in quick_fields and "document_type" in quick_fields:
+                rows = [{"document_type": row["quick_list_name"], "label": row["quick_list_name"]} for row in rows]
+                ref_fields[key] = {"document_type":["document_type"], "label":["label"]}
         table = choose("Workspace", aliases[key],table=True,required=bool(rows))
         if table:
             set_child_rows(doc, table, rows, ref_fields[key])
@@ -146,8 +153,19 @@ def publish_navigation(studio, capture_before, capture_after):
     put(doc,[module_field],studio.module_name)
     put(doc,["title","label"],nav.get("title") or studio.workspace_title)
     table = choose(dt,["items","sidebar_items","links","entries"],table=True,required=True)
-    set_child_rows(doc,table,nav["items"],{
+    items = copy.deepcopy(nav["items"])
+    child_fields = fields(fields(dt)[table].options)
+    # Modern v16 separates the row kind from the destination DocType.
+    if "type" in child_fields and "link_type" in child_fields:
+        for item in items:
+            item["link_type"] = item.get("type", "DocType")
+            item["type"] = "Link"
+            if item["link_type"] == "URL": item["url"] = item.pop("link_to", "")
+    if any(item.get("indent") for item in items) and not designer_capabilities()["sidebar_indent"]:
+        frappe.throw(_("This Sidebar schema does not support numeric nesting"))
+    set_child_rows(doc,table,items,{
         "label":["label","title"],"type":["type","link_type"],
+        "link_type":["link_type"],"url":["url"],
         "link_to":["link_to","link","target"],"icon":["icon"],
         "indent":["indent","level"],"hidden":["hidden","is_hidden"]
     })
@@ -164,13 +182,23 @@ def publish_dock(studio,capture_before,capture_after):
     dt="Dock"
     app_field=choose(dt,["app","app_name"],required=True)
     app=design.get("app","erpnext")
-    existing=frappe.db.get_value(dt,{app_field:app},"name")
+    filters = {app_field: app}
+    if "user" in fields(dt): filters["user"] = ["in", ["", None]]
+    if "standard" in fields(dt): filters["standard"] = 0
+    existing=frappe.db.get_value(dt,filters,"name")
     doc=frappe.get_doc(dt,existing) if existing else frappe.new_doc(dt)
     put(doc,[app_field],app)
     table=choose(dt,["items","entries","dock_items","links"],table=True,required=True)
-    set_child_rows(doc,table,design["entries"],{
+    entries = copy.deepcopy(design["entries"])
+    child_fields = fields(fields(dt)[table].options)
+    for item in entries:
+        if item.get("link_type") == "URL" and "url" in child_fields:
+            item["url"] = item.pop("link_to", "")
+        if "added" in child_fields: item["added"] = 1
+    set_child_rows(doc,table,entries,{
         "title":["title","label"],"icon":["icon"],"sidebar":["sidebar","module"],
-        "link_type":["link_type","type"],"link_to":["link_to","target"]
+        "link_type":["link_type","type"],"link_to":["link_to","target"],
+        "url":["url"],"added":["added"]
     })
     previous=capture(dt,existing) if existing else None
     name=write(doc)
@@ -191,11 +219,13 @@ def publish_desktop_icons(studio,capture_before,capture_after):
         existing=frappe.db.get_value("Desktop Icon",{label_field:label},"name")
         doc=frappe.get_doc("Desktop Icon",existing) if existing else frappe.new_doc("Desktop Icon")
         put(doc,[label_field],label)
+        values = copy.deepcopy(icon)
+        if values.get("link_type") == "External": values["link"] = values.pop("link_to", "")
         for key, aliases in {
-            "icon":["icon"],"link_to":["link_to","link"],"link_type":["link_type","type"],
+            "link":["link"], "icon":["icon"],"link_to":["link_to","link"],"link_type":["link_type","type"],
             "hidden":["hidden","is_hidden"]
         }.items():
-            if key in icon: put(doc,aliases,icon[key],required=True)
+            if key in values: put(doc,aliases,values[key],required=True)
         previous=capture("Desktop Icon",existing) if existing else None
         name=write(doc)
         capture_before.append(previous or {"doctype":"Desktop Icon","name":name,"existed":False})
@@ -215,3 +245,22 @@ def inspect():
     return {dt:[{"fieldname":f.fieldname,"fieldtype":f.fieldtype,"options":f.options}
                  for f in frappe.get_meta(dt).fields]
             for dt in ["Workspace","Workspace Sidebar","Sidebar","Dock","Desktop Icon"] if available(dt)}
+
+
+def designer_capabilities():
+    dt = "Sidebar" if available("Sidebar") else "Workspace Sidebar" if available("Workspace Sidebar") else None
+    table = choose(dt, ["items", "sidebar_items", "links", "entries"], table=True) if dt else None
+    child = fields(fields(dt)[table].options) if table else {}
+    indent = next((child[k] for k in ("indent", "level") if k in child), None)
+    def link_types(doctype, table_names=None):
+        ff = fields(doctype)
+        if table_names:
+            table_name = choose(doctype, table_names, table=True)
+            ff = fields(ff[table_name].options) if table_name else {}
+        field = ff.get("link_type") or ff.get("type")
+        return [x for x in (field.options or "").split("\n") if x] if field and field.fieldtype == "Select" else []
+    return {"sidebar_indent": bool(indent and indent.fieldtype == "Int"),
+            "link_types": {"workspace": link_types("Workspace Shortcut"),
+                           "sidebar": link_types(dt, ["items", "sidebar_items", "links", "entries"]) if dt else [],
+                           "dock": link_types("Dock", ["items", "entries", "dock_items", "links"]),
+                           "desktop": link_types("Desktop Icon")}}
