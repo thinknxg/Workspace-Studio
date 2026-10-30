@@ -3,6 +3,7 @@ import frappe
 from frappe import _
 from frappe.utils import now_datetime
 from thinknxg_workspace_studio import native
+from thinknxg_workspace_studio.validation import validate_design
 
 MANAGERS={"System Manager","Workspace Studio Manager"}
 
@@ -31,7 +32,9 @@ def bootstrap():
     return {"modules":frappe.get_all("Module Def",pluck="name",order_by="name"),
             "native_workspaces":frappe.get_all("Workspace",fields=["name","title","module"],limit_page_length=500),
             "studio_workspaces":frappe.get_all("Studio Workspace",fields=["name","workspace_title","status"],limit_page_length=500),
-            "schema":native.inspect()}
+            "schema":native.inspect(),
+            "capabilities":native.designer_capabilities(),
+            "can_publish":bool(frappe.get_single("Studio Settings").enable_guarded_publish)}
 
 @frappe.whitelist()
 def load(name):
@@ -44,7 +47,10 @@ def save_design(name=None,title=None,module=None,layout=None,navigation=None,doc
     design=frappe.parse_json(layout or '{"components":[]}')
     if not isinstance(design,dict) or not isinstance(design.get("components"),list):
         frappe.throw(_("Layout must include a components list"))
-    if len(design["components"]) > 250: frappe.throw(_("Too many components"))
+    nav = frappe.parse_json(navigation) if navigation is not None else {}
+    dock_design = frappe.parse_json(dock) if dock is not None else {}
+    errors = validate_design(design, nav, dock_design)
+    if errors: frappe.throw("; ".join(errors))
     if name:
         doc=frappe.get_doc("Studio Workspace",name)
     else:
@@ -52,7 +58,7 @@ def save_design(name=None,title=None,module=None,layout=None,navigation=None,doc
         doc=frappe.new_doc("Studio Workspace")
         doc.workspace_key=frappe.scrub(title)+"_"+frappe.generate_hash(length=6)
     doc.workspace_title=title or doc.workspace_title
-    doc.module_name=module or doc.module_name
+    doc.module_name=module if module is not None else doc.module_name
     doc.scope=scope
     doc.target_workspace=target_workspace or None
     doc.layout_json=json.dumps(design,ensure_ascii=False)
@@ -71,6 +77,11 @@ def publish(name,note=None):
     if frappe.get_single("Studio Settings").require_publish_note and not (note or "").strip():
         frappe.throw(_("Publication note required"))
     studio=frappe.get_doc("Studio Workspace",name)
+    payload = design_payload(studio)
+    errors = validate_design(payload["layout"], payload["navigation"], payload["dock"], strict=True)
+    if errors: frappe.throw("; ".join(errors))
+    if "items" in payload["navigation"] and not studio.module_name:
+        frappe.throw(_("Sidebar requires a module"))
     # All native updates, snapshots and status changes commit together or roll back.
     frappe.db.savepoint("wss_publish")
     try:

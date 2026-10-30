@@ -1,126 +1,191 @@
-frappe.pages['workspace-studio'].on_page_load = (wrapper) => {
-    const page = frappe.ui.make_app_page({parent:wrapper,title:__('Workspace Studio'),single_column:true});
-    const root = $(wrapper).find('.layout-main-section');
-    let current = null, selected = null;
-    let design = {version:1,components:[]};
-    const escape = (x) => frappe.utils.escape_html(String(x ?? ''));
-    root.html(`
-      <div class="wss-head"><div><h2>thinkNXG Workspace Studio</h2><p>Native ERPNext v16 workspace designer</p></div>
-      <div><button class="btn btn-default" id="wss-schema">Inspect Native Schema</button>
-      <button class="btn btn-default" id="wss-publish">Publish</button>
-      <button class="btn btn-primary" id="wss-save">Save</button></div></div>
-      <div class="wss-fields">
-        <input id="wss-title" class="form-control" placeholder="Workspace title">
-        <select id="wss-module" class="form-control"><option value="">Module</option></select>
-        <select id="wss-target" class="form-control"><option value="">Create new workspace</option></select>
-        <select id="wss-existing" class="form-control"><option value="">New Studio design</option></select>
-      </div>
-      <div class="wss-layout">
-        <aside class="wss-panel"><h4>Components</h4><div id="wss-palette"></div></aside>
-        <main class="wss-panel"><h4>Canvas</h4><div id="wss-canvas" class="wss-canvas"></div></main>
-        <aside class="wss-panel"><h4>Properties</h4><div id="wss-properties">Select a component</div>
-        <h4>Navigation JSON</h4><textarea id="wss-nav" class="form-control" rows="7">{}</textarea>
-        <h4>Dock JSON</h4><textarea id="wss-dock" class="form-control" rows="7">{}</textarea></aside>
-      </div>`);
-    const types=['heading','text','shortcut','chart','number_card','quick_list','spacer'];
-    types.forEach(type => root.find('#wss-palette').append(
-        `<button class="wss-palette-item btn btn-default" draggable="true" data-type="${type}">${escape(type.replace('_',' '))} ＋</button>`
-    ));
-    function render(){
-        const canvas=root.find('#wss-canvas').empty();
-        design.components.forEach((c,i)=>canvas.append(
-          `<div class="wss-block" draggable="true" data-index="${i}">
-            <small>${escape(c.type)}</small><strong>${escape(c.title)}</strong>
-            <span class="wss-delete" data-index="${i}">×</span></div>`
-        ));
-        const c=design.components[selected];
-        root.find('#wss-properties').html(c ?
-          `<label>Title</label><input id="wss-prop-title" class="form-control" value="${escape(c.title)}">
-           <label>Description</label><textarea id="wss-prop-desc" class="form-control">${escape(c.description)}</textarea>
-           ${c.type === 'shortcut' ? `<label>Link Type</label><select id="wss-prop-link-type" class="form-control"><option value="DocType" ${c.config?.link_type === 'DocType' ? 'selected' : ''}>DocType</option><option value="Page" ${c.config?.link_type === 'Page' ? 'selected' : ''}>Page</option><option value="Report" ${c.config?.link_type === 'Report' ? 'selected' : ''}>Report</option></select><label>Link To (required)</label><input id="wss-prop-link-to" class="form-control" placeholder="e.g. Sales Order" value="${escape(c.config?.link_to || '')}">` : ''}
-           <label>Config JSON</label><textarea id="wss-prop-json" class="form-control" rows="8">${escape(JSON.stringify(c.config||{},null,2))}</textarea>` :
-          'Select a component');
+frappe.pages['workspace-studio'].on_page_load = async wrapper => {
+    frappe.ui.make_app_page({parent:wrapper,title:__('Workspace Studio'),single_column:true});
+    await frappe.require('/assets/thinknxg_workspace_studio/js/designer_model.js');
+    const M = window.WorkspaceStudioModel, root = $(wrapper).find('.layout-main-section');
+    const esc = x => frappe.utils.escape_html(String(x ?? ''));
+    const call = async (method,args={}) => (await frappe.call({method:'thinknxg_workspace_studio.api.'+method,args})).message;
+    let state = M.load(), current = null, selected = null, surface = 'workspace', preview = false, dirty = false, busy = false, scope = 'Global', boot;
+    const labels = {workspace:'Workspace',sidebar:'Sidebar',dock:'Dock',desktop:'Desktop Icons'};
+    root.html(`<div class="wss-head"><div><h2>thinkNXG Workspace Studio</h2><p>Design your ERPNext workspace visually</p><span id="wss-status" role="status"></span></div><div>
+        <button class="btn btn-default" id="wss-history">History / Rollback</button>
+        <button class="btn btn-default" id="wss-preview">Preview</button>
+        <button class="btn btn-default" id="wss-validate">Validate</button>
+        <button class="btn btn-default" id="wss-publish" disabled>Publish</button>
+        <button class="btn btn-primary" id="wss-save" disabled>Save</button></div></div>
+        <div class="wss-fields"><label>Workspace title<input id="wss-title" class="form-control"></label><label>Module<select id="wss-module" class="form-control"></select></label><label>Native workspace<select id="wss-target" class="form-control"></select></label><label>Studio design<select id="wss-existing" class="form-control"></select></label></div>
+        <nav class="wss-tabs" aria-label="Design surface">${Object.entries(labels).map(([key,label])=>`<button class="btn btn-default" data-surface="${key}">${label}</button>`).join('')}</nav>
+        <div id="wss-errors" role="alert"></div><div class="wss-layout"><aside class="wss-panel wss-edit"><h4>Components</h4><p>Drag onto the canvas, or click to add.</p><div id="wss-palette"></div><div id="wss-surface-options"></div></aside><main class="wss-panel"><h4 id="wss-canvas-title"></h4><p id="wss-help"></p><div id="wss-canvas" class="wss-canvas"></div></main><aside class="wss-panel wss-edit"><h4>Properties</h4><div id="wss-properties"></div></aside></div>`);
+    const list = (create=false) => M.rows(state,surface,create);
+    function changed() { dirty=true; root.find('#wss-status').text('Unsaved changes'); }
+    function errors() {
+        const result=M.validate(state);
+        if (!String(root.find('#wss-title').val() || '').trim()) result.unshift('Workspace title required');
+        if (state.navigation.items && !root.find('#wss-module').val()) result.push('Sidebar requires a module');
+        root.find('#wss-errors').html(result.length ? '<ul>'+result.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>' : '');
+        return result;
     }
-    root.on('click','.wss-palette-item',function(){
-        design.components.push({id:frappe.utils.get_random(10),type:$(this).data('type'),title:$(this).data('type'),description:'',config:$(this).data('type') === 'shortcut' ? {link_type:'DocType',link_to:''} : {}});
-        selected=design.components.length-1;render();
-    });
-    root.on('click','.wss-block',function(){selected=Number($(this).data('index'));render();});
-    root.on('click','.wss-delete',function(e){e.stopPropagation();design.components.splice(Number($(this).data('index')),1);selected=null;render();});
-    root.on('change','#wss-prop-title, #wss-prop-desc, #wss-prop-json, #wss-prop-link-to, #wss-prop-link-type',function(){
-        if(selected===null)return;
-        const c=design.components[selected];
-        try{
-            c.title=root.find('#wss-prop-title').val();
-            c.description=root.find('#wss-prop-desc').val();
-            c.config=JSON.parse(root.find('#wss-prop-json').val());
-            if(c.type === 'shortcut') {
-                if(this.id === 'wss-prop-link-to') c.config.link_to = String($(this).val() || '').trim();
-                if(this.id === 'wss-prop-link-type') c.config.link_type = $(this).val();
-            }
-        }catch(e){frappe.msgprint(__('Invalid component JSON'));return;}
-        render();
-    });
-    root.on('dragstart','.wss-block',function(e){e.originalEvent.dataTransfer.setData('reorder',$(this).data('index'));});
-    root.on('dragover','#wss-canvas,.wss-block',e=>e.preventDefault());
-    root.on('drop','.wss-block',function(e){
-        e.preventDefault();
-        const from=e.originalEvent.dataTransfer.getData('reorder'),to=Number($(this).data('index'));
-        if(from!==''){
-            const item=design.components.splice(Number(from),1)[0];design.components.splice(to,0,item);render();
+    function control(parent, df, value, onChange) {
+        let initializing=true;
+        const ctl=frappe.ui.form.make_control({parent,df:{...df,change:()=>{if(!initializing){onChange(ctl.get_value());changed();drawCanvas();}}},render_input:true});
+        Promise.resolve(ctl.set_value(value ?? '')).then(()=>{initializing=false;},()=>{initializing=false;});
+        return ctl;
+    }
+    function renderOptions() {
+        const host=root.find('#wss-surface-options').empty();
+        if (surface === 'sidebar') control(host,{fieldtype:'Data',label:'Sidebar title'},state.navigation.title,v=>state.navigation.title=v);
+        if (surface === 'dock') control(host,{fieldtype:'Data',label:'Application'},state.dock.app || 'erpnext',v=>state.dock.app=v);
+        if (surface !== 'workspace') {
+            const object=surface === 'sidebar' ? state.navigation : state.dock;
+            const key=surface === 'sidebar' ? 'items' : surface === 'dock' ? 'entries' : 'desktop_icons';
+            control(host,{fieldtype:'Check',label:'Publish this surface'},key in object,v=>{
+                if(v) object[key]=object[key] || [];
+                else if (!(object[key] || []).length || window.confirm('Remove these items from this saved design? Native Desktop Icons already published will remain.')) {delete object[key];selected=null;}
+                render();
+            });
         }
-    });
-    async function call(method,args={}) {
-        const r=await frappe.call({method:'thinknxg_workspace_studio.api.'+method,args});return r.message;
     }
-    async function refresh(){
-        const data=await call('bootstrap');
-        root.find('#wss-module').empty().append('<option value="">Module</option>');
-        data.modules.forEach(x=>root.find('#wss-module').append(`<option>${escape(x)}</option>`));
-        root.find('#wss-target').empty().append('<option value="">Create new workspace</option>');
-        data.native_workspaces.forEach(x=>root.find('#wss-target').append(`<option value="${escape(x.name)}">${escape(x.title||x.name)}</option>`));
-        root.find('#wss-existing').empty().append('<option value="">New Studio design</option>');
-        data.studio_workspaces.forEach(x=>root.find('#wss-existing').append(`<option value="${escape(x.name)}">${escape(x.workspace_title)}</option>`));
+    function renderProperties() {
+        const host=root.find('#wss-properties').empty(), row=list()[selected];
+        if (!row) {host.text('Select an item to edit its properties.');return;}
+        const workspace=surface === 'workspace', cfg=workspace ? (row.config ||= {}) : row;
+        const field=(obj,key,label,type='Data',options=null) => control(host,{fieldtype:type,fieldname:key,label,...(options ? {options} : {})},obj[key],v=>obj[key]=type === 'Int' ? Number(v) : v);
+        field(row,workspace || surface === 'dock' ? 'title' : 'label','Title');
+        if (workspace) {
+            field(cfg,'col','Width (1–12 columns)','Int');
+            if (row.type === 'heading') field(cfg,'level','Heading level','Select',['1','2','3','4','5','6'].join('\n'));
+            if (row.type === 'text') field(row,'description','Text','Small Text');
+            const selector={chart:['chart_name','Dashboard Chart'],number_card:['number_card_name','Number Card'],quick_list:['quick_list_name','DocType']}[row.type];
+            if (selector) field(cfg,selector[0],selector[1],'Link',selector[1]);
+            if (!M.types.includes(row.type)) host.append('<p>Unsupported component preserved. Remove it or use a supported component before publishing.</p>');
+        }
+        if (!workspace || row.type === 'shortcut') {
+            const typeKey=surface === 'sidebar' ? 'type' : 'link_type';
+            const supported=boot?.capabilities?.link_types?.[surface] || [];
+            const type=cfg[typeKey] || supported[0] || 'DocType';
+            const options=Array.from(new Set([...(supported.length ? supported : ['DocType','Report','Page','Workspace','Dashboard','URL']),type])).join('\n');
+            control(host,{fieldtype:'Select',label:'Link type',options},type,v=>{cfg[typeKey]=v;cfg.link_to='';renderProperties();});
+            field(cfg,'link_to','Destination',['URL','External'].includes(type) ? 'Data' : 'Link',['URL','External'].includes(type) ? null : type);
+            if (!workspace) field(row,'icon','Icon');
+            if (surface === 'dock') field(row,'sidebar','Sidebar / module');
+            if (surface === 'sidebar' || surface === 'desktop') field(row,'hidden','Hidden','Check');
+        }
+        const actions=$('<div class="wss-actions"></div>').appendTo(host);
+        const button=(label,fn)=>$('<button type="button" class="btn btn-default"></button>').text(label).on('click',fn).appendTo(actions);
+        button('Move up',()=>move(selected,selected-1));
+        button('Move down',()=>{let end=selected+1; if(surface==='sidebar') while(end<list().length && Number(list()[end].indent||0)>Number(row.indent||0))end++; let to=end+1; if(surface==='sidebar' && list()[end]) while(to<list().length && Number(list()[to].indent||0)>Number(list()[end].indent||0))to++;move(selected,to);});
+        if(surface === 'sidebar' && nestingSupported()) {
+            button('Indent',()=>{M.indent(list(),selected,1);changed();render();});
+            button('Outdent',()=>{M.indent(list(),selected,-1);changed();render();});
+        }
+        button('Delete',()=>{
+            let end=selected+1;
+            if(surface==='sidebar') while(end<list().length && Number(list()[end].indent||0)>Number(row.indent||0))end++;
+            if(end-selected>1 && !window.confirm('Delete this item and its nested items?'))return;
+            list().splice(selected,end-selected);selected=null;changed();render();
+        });
     }
-    root.find('#wss-existing').on('change',async function(){
-        current=$(this).val()||null;if(!current)return;
-        const d=await call('load',{name:current});
-        design=JSON.parse(d.layout_json||'{"components":[]}');
-        root.find('#wss-title').val(d.workspace_title);
-        root.find('#wss-module').val(d.module_name);
-        root.find('#wss-target').val(d.target_workspace||'');
-        root.find('#wss-nav').val(d.navigation_json||'{}');
-        root.find('#wss-dock').val(d.dock_json||'{}');
-        selected=null;render();
-    });
-    function validateShortcuts() {
-        const invalid = design.components.find(c => c.type === 'shortcut' && !String(c.config?.link_to || '').trim());
-        if(invalid) { frappe.msgprint(__('Shortcut "{0}" requires a Link To target (e.g. Sales Order). Select the shortcut and fill Link To in Properties.', [invalid.title || 'Untitled'])); return false; }
-        return true;
+    function nestingSupported() {return !!boot?.capabilities?.sidebar_indent;}
+    function drawCanvas() {
+        const canvas=root.find('#wss-canvas').empty().toggleClass('wss-grid',surface==='workspace' || surface==='desktop');
+        list().forEach((row,i)=>{
+            const cfg=surface==='workspace' ? row.config || {} : row;
+            const title=row.title || row.label || row.type || 'Untitled';
+            const element=$('<div class="wss-block" tabindex="0" role="button"></div>').attr({'data-index':i,'draggable':!preview,'aria-label':'Select '+title}).toggleClass('selected',i===selected && !preview);
+            if(surface==='workspace') element.css('grid-column','span '+Math.max(1,Math.min(12,Number(cfg.col)||4)));
+            if(surface==='sidebar') element.css('margin-left',Number(row.indent||0)*22+'px');
+            if(surface==='desktop') element.css('grid-column','span 3');
+            element.append($('<small></small>').text(row.type || labels[surface]),$('<strong></strong>').text(title));
+            if(row.type==='text') element.append($('<p></p>').text(row.description || cfg.body || ''));
+            if(row.type==='chart') element.append($('<div class="wss-chart" aria-label="Chart placeholder">▂ ▅ ▃ ▇ ▄</div>'));
+            if(row.type==='number_card') element.append($('<div class="wss-number">—</div>'));
+            const destination=cfg.link_to || cfg.chart_name || cfg.number_card_name || cfg.quick_list_name || cfg.sidebar;
+            if(destination) element.append($('<span></span>').text(destination));
+            if(row.hidden) element.append($('<small></small>').text('Hidden'));
+            canvas.append(element);
+        });
+        if(!preview) canvas.append('<div class="wss-drop-end">Drop here to append</div>');
+        if(!list().length) canvas.prepend($('<p class="wss-empty"></p>').text(preview ? 'No items on this surface.' : 'Drag a component here to begin.'));
     }
-    root.find('#wss-save').on('click',async()=>{
-        if(!validateShortcuts()) return;
-        const response=await call('save_design',{
-            name:current,title:root.find('#wss-title').val(),
-            module:root.find('#wss-module').val(),
-            target_workspace:root.find('#wss-target').val(),
-            layout:JSON.stringify(design),navigation:root.find('#wss-nav').val(),
-            dock:root.find('#wss-dock').val()
-        });current=response.name;frappe.show_alert({message:__('Design saved'),indicator:'green'});await refresh();
+    function render() {
+        root.find('[data-surface]').removeClass('btn-primary').filter('[data-surface="'+surface+'"]').addClass('btn-primary');
+        root.find('.wss-edit').toggle(!preview); root.find('.wss-layout').toggleClass('wss-preview',preview);
+        root.find('#wss-preview').text(preview?'Exit preview':'Preview');
+        root.find('#wss-canvas-title').text(labels[surface]+(preview?' preview':''));
+        root.find('#wss-help').text(preview ? 'Layout preview. Charts and numbers are placeholders; native rendering depends on your installed Frappe schema.' : surface==='sidebar' ? (nestingSupported() ? 'Drag to reorder. Nested items move with their parent.' : 'Drag to reorder. Numeric nesting is unavailable in this installed Sidebar schema.') : surface==='desktop' ? 'Order is saved in the design. Native Desktop Icons have no position mapping; removing one here does not delete a published icon.' : 'Drop before an item to reorder, or append at the bottom.');
+        const palette=root.find('#wss-palette').empty();
+        (surface==='workspace'?M.types:['link']).forEach(type=>palette.append($('<button class="wss-palette-item btn btn-default" draggable="true"></button>').attr('data-type',type).text('+ '+(type==='link'?labels[surface]+' item':type.replaceAll('_',' ')))));
+        renderOptions(); drawCanvas();renderProperties();
+    }
+    function add(type,at=list().length) {
+        if(surface==='workspace' && !M.types.includes(type))return;
+        const row=surface==='workspace'?{id:frappe.utils.get_random(10),type,title:type.replaceAll('_',' '),description:'',config:{col:type==='heading'||type==='text'?12:4,...(type==='shortcut'?{link_type:'DocType',link_to:''}:{})}}:surface==='sidebar'?{label:'New item',type:'DocType',link_to:'',indent:0}:surface==='dock'?{title:'New item',link_type:'DocType',link_to:''}:{label:'New icon',link_type:'DocType',link_to:''};
+        if(surface !== 'workspace') {
+            const key=surface === 'sidebar' ? 'type' : 'link_type';
+            row[key]=boot?.capabilities?.link_types?.[surface]?.[0] || 'DocType';
+        }
+        list(true).splice(at,0,row);selected=at;changed();render();
+    }
+    function move(from,to){if(preview)return;selected=M.move(list(),from,to,surface==='sidebar');changed();render();}
+    root.on('click','[data-surface]',function(){surface=$(this).attr('data-surface');selected=null;render();});
+    root.on('click','.wss-palette-item',function(){if(!preview)add($(this).attr('data-type'));});
+    root.on('click keydown','.wss-block',function(e){if(e.type==='keydown' && !['Enter',' '].includes(e.key))return;if(!preview){e.preventDefault();selected=Number($(this).attr('data-index'));drawCanvas();renderProperties();}});
+    root.on('dragstart','.wss-block,.wss-palette-item',function(e){if(preview){e.preventDefault();return;}e.originalEvent.dataTransfer.setData('application/x-workspace-studio',JSON.stringify({surface,type:$(this).attr('data-type'),index:$(this).attr('data-index')}));});
+    root.on('dragover','#wss-canvas',e=>{if(!preview)e.preventDefault();});
+    root.on('drop','#wss-canvas',function(e){
+        e.preventDefault();if(preview)return;
+        let data;try{data=JSON.parse(e.originalEvent.dataTransfer.getData('application/x-workspace-studio'));}catch{return;}
+        if(data.surface!==surface)return;
+        const block=$(e.target).closest('.wss-block'),to=block.length?Number(block.attr('data-index')):list().length;
+        if(data.type)add(data.type,to);else if(data.index!=null)move(Number(data.index),to);
     });
+    root.find('#wss-preview').on('click',()=>{preview=!preview;render();});
+    root.find('#wss-validate').on('click',()=>{if(!errors().length)frappe.show_alert({message:__('Design is valid locally; native schema checks run at publish.'),indicator:'green'});});
+    root.find('#wss-title,#wss-module,#wss-target').on('change',changed);
+    function working(action){return async()=>{if(busy)return;busy=true;root.find('button,input,select,textarea').prop('disabled',true);try{await action();}catch(e){frappe.msgprint(esc(e.message || 'Operation failed'));}finally{busy=false;root.find('button,input,select,textarea').prop('disabled',false);root.find('#wss-publish').prop('disabled',!boot?.can_publish);}};}
+    async function refresh() {
+        boot=await call('bootstrap');
+        const options=(id,rows,first)=>{const el=root.find(id),value=el.val();el.empty().append($('<option value=""></option>').text(first));rows.forEach(([key,label])=>el.append($('<option></option>').val(key).text(label)));el.val(value);};
+        options('#wss-module',boot.modules.map(x=>[x,x]),'Choose module');
+        options('#wss-target',boot.native_workspaces.map(x=>[x.name,x.title||x.name]),'Create new workspace');
+        options('#wss-existing',boot.studio_workspaces.map(x=>[x.name,x.workspace_title]),'New Studio design');
+        root.find('#wss-existing').val(current || '');
+    }
+    async function save() {
+        if(errors().length)throw Error('Correct the validation errors before saving.');
+        const result=await call('save_design',{name:current,title:root.find('#wss-title').val(),module:root.find('#wss-module').val(),target_workspace:root.find('#wss-target').val(),scope,layout:JSON.stringify(state.layout),navigation:JSON.stringify(state.navigation),dock:JSON.stringify(state.dock)});
+        current=result.name;dirty=false;root.find('#wss-status').text('Saved draft');await refresh();
+    }
+    root.find('#wss-save').on('click',working(save));
+    root.find('#wss-existing').on('change',working(async()=>{
+        const next=root.find('#wss-existing').val() || null;
+        if(dirty && !window.confirm('Discard unsaved changes?')){root.find('#wss-existing').val(current || '');return;}
+        const doc=next?await call('load',{name:next}):{};
+        const loaded=M.load(doc); // Parse before replacing the active design.
+        state=loaded;current=next;scope=doc.scope || 'Global';selected=null;dirty=false;
+        root.find('#wss-title').val(doc.workspace_title || '');root.find('#wss-module').val(doc.module_name || '');root.find('#wss-target').val(doc.target_workspace || '');root.find('#wss-status').text(next?'Loaded':'New design');root.find('#wss-errors').empty();render();
+    }));
+    // The note callback saves the exact visible design before invoking the existing guarded publisher.
     root.find('#wss-publish').on('click',()=>{
-        if(!current){frappe.msgprint(__('Save the design first'));return;}
-        if(!validateShortcuts()) return;
-        frappe.prompt([{fieldtype:'Small Text',fieldname:'note',label:'Publish note',reqd:1}],
-            async values=>{const result=await call('publish',{name:current,note:values.note});
-                frappe.msgprint(__('Published workspace {0}. Backup version: {1}',[result.workspace,result.version]));},
-            __('Publish to native ERPNext'),__('Publish'));
+        if(!boot.can_publish || errors().length)return;
+        frappe.prompt([{fieldtype:'Small Text',fieldname:'note',label:'Publish note',reqd:1}],values=>working(async()=>{
+            await save();const result=await call('publish',{name:current,note:values.note});
+            root.find('#wss-target').val(result.workspace);root.find('#wss-status').text('Published · backup '+result.version);
+            frappe.msgprint(__('Published workspace {0}. Backup version: {1}',[esc(result.workspace),esc(result.version)]));
+        })(),__('Publish to native ERPNext'),__('Publish'));
     });
-    root.find('#wss-schema').on('click',async()=>{
-        const schemas=await call('inspect_native');
-        const dlg=new frappe.ui.Dialog({title:__('Native DocType schemas'),size:'extra-large',
-            fields:[{fieldtype:'Code',fieldname:'json',label:'Schema',options:'JSON'}]});
-        dlg.show();dlg.set_value('json',JSON.stringify(schemas,null,2));
-    });
-    refresh();render();
+    root.find('#wss-history').on('click',working(async()=>{
+        if(!current)throw Error('Save a design first.');
+        const versions=await call('versions',{name:current});
+        const dlg=new frappe.ui.Dialog({title:__('Native backups'),fields:[{fieldtype:'HTML',fieldname:'history'}]});
+        const host=dlg.fields_dict.history.$wrapper;
+        versions.forEach(v=>{
+            const line=$('<p></p>').text('#'+v.version_number+' · '+v.action+' · '+v.change_summary+' ');
+            if(v.action==='Published') $('<button class="btn btn-default">Rollback</button>').on('click',()=>frappe.confirm(__('Restore this native backup? Later manual changes will be checked before restoring.'),()=>working(async()=>{
+                const result=await call('rollback',{version_name:v.name,note:'Restored from visual designer'});dlg.hide();frappe.msgprint(__('Restored {0} native documents.',[result.restored]));root.find('#wss-status').text('Native backup restored; design remains a draft');
+            })())).appendTo(line);
+            host.append(line);
+        });if(!versions.length)host.text('No saved versions.');dlg.show();
+    }));
+    try {await refresh();root.find('#wss-save').prop('disabled',false);root.find('#wss-publish').prop('disabled',!boot.can_publish).attr('title',boot.can_publish?'Publish saved design':'Enable guarded publishing in Studio Settings');render();}
+    catch(e){root.find('#wss-errors').text(e.message || 'Unable to load Workspace Studio.');}
 };
