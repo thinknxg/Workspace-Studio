@@ -1,0 +1,41 @@
+{
+  "doctype": "DocType",
+  "name": "Studio Settings",
+  "module": "Workspace Studio",
+  "custom": 0,
+  "autoname": "field:name",
+  "issingle": 1,
+  "fields": [
+    {
+      "fieldname": "enable_guarded_publish",
+      "label": "Enable Guarded Publishing",
+      "fieldtype": "Check",
+      "default": 0
+    },
+    {
+      "fieldname": "require_publish_note",
+      "label": "Require Publish Note",
+      "fieldtype": "Check",
+      "default": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "export": 1
+    },
+    {
+      "role": "Workspace Studio Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "export": 1
+    }
+  ],
+  "track_changes": 1
+}

@@ -1,0 +1,109 @@
+{
+  "doctype": "DocType",
+  "name": "Studio Workspace",
+  "module": "Workspace Studio",
+  "custom": 0,
+  "autoname": "field:workspace_key",
+  "issingle": 0,
+  "fields": [
+    {
+      "fieldname": "workspace_title",
+      "label": "Workspace Title",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "workspace_key",
+      "label": "Workspace Key",
+      "fieldtype": "Data",
+      "reqd": 1,
+      "unique": 1
+    },
+    {
+      "fieldname": "module_name",
+      "label": "Module",
+      "fieldtype": "Link",
+      "options": "Module Def"
+    },
+    {
+      "fieldname": "icon",
+      "label": "Icon",
+      "fieldtype": "Data"
+    },
+    {
+      "fieldname": "description",
+      "label": "Description",
+      "fieldtype": "Small Text"
+    },
+    {
+      "fieldname": "status",
+      "label": "Status",
+      "fieldtype": "Select",
+      "options": "Draft\nPublished\nArchived",
+      "default": "Draft"
+    },
+    {
+      "fieldname": "scope",
+      "label": "Scope",
+      "fieldtype": "Select",
+      "options": "Global\nRole\nDepartment\nCompany\nUser",
+      "default": "Global"
+    },
+    {
+      "fieldname": "target_workspace",
+      "label": "Target Workspace",
+      "fieldtype": "Link",
+      "options": "Workspace"
+    },
+    {
+      "fieldname": "layout_json",
+      "label": "Layout JSON",
+      "fieldtype": "Code",
+      "options": "JSON"
+    },
+    {
+      "fieldname": "navigation_json",
+      "label": "Navigation JSON",
+      "fieldtype": "Code",
+      "options": "JSON"
+    },
+    {
+      "fieldname": "dock_json",
+      "label": "Dock JSON",
+      "fieldtype": "Code",
+      "options": "JSON"
+    },
+    {
+      "fieldname": "last_published_on",
+      "label": "Last Published On",
+      "fieldtype": "Datetime",
+      "read_only": 1
+    },
+    {
+      "fieldname": "last_published_by",
+      "label": "Last Published By",
+      "fieldtype": "Link",
+      "options": "User",
+      "read_only": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "export": 1
+    },
+    {
+      "role": "Workspace Studio Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "export": 1
+    }
+  ],
+  "track_changes": 1
+}

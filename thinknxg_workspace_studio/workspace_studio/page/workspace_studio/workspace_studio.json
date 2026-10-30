@@ -1,0 +1,16 @@
+{
+  "doctype": "Page",
+  "name": "workspace-studio",
+  "page_name": "workspace-studio",
+  "title": "Workspace Studio",
+  "module": "Workspace Studio",
+  "standard": "Yes",
+  "roles": [
+    {
+      "role": "System Manager"
+    },
+    {
+      "role": "Workspace Studio Manager"
+    }
+  ]
+}

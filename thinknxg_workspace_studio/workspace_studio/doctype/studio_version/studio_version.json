@@ -1,0 +1,58 @@
+{
+  "doctype": "DocType",
+  "name": "Studio Version",
+  "module": "Workspace Studio",
+  "custom": 0,
+  "autoname": "hash",
+  "issingle": 0,
+  "fields": [
+    {
+      "fieldname": "studio_workspace",
+      "label": "Studio Workspace",
+      "fieldtype": "Link",
+      "options": "Studio Workspace",
+      "reqd": 1
+    },
+    {
+      "fieldname": "version_number",
+      "label": "Version Number",
+      "fieldtype": "Int"
+    },
+    {
+      "fieldname": "snapshot_json",
+      "label": "Snapshot JSON",
+      "fieldtype": "Code",
+      "options": "JSON"
+    },
+    {
+      "fieldname": "action",
+      "label": "Action",
+      "fieldtype": "Select",
+      "options": "Saved\nPublished\nRolled Back"
+    },
+    {
+      "fieldname": "change_summary",
+      "label": "Change Summary",
+      "fieldtype": "Small Text"
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "export": 1
+    },
+    {
+      "role": "Workspace Studio Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "export": 1
+    }
+  ],
+  "track_changes": 1
+}

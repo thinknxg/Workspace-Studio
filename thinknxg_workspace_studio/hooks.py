@@ -1,0 +1,8 @@
+app_name = "thinknxg_workspace_studio"
+app_title = "thinkNXG Workspace Studio"
+app_publisher = "thinkNXG"
+app_description = "Visual workspace builder for Frappe/ERPNext v16"
+app_email = "sales@thinknxg.com"
+app_license = "MIT"
+after_install = "thinknxg_workspace_studio.install.after_install"
+app_include_css = "/assets/thinknxg_workspace_studio/css/workspace_studio.css"

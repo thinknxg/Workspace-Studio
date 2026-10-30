@@ -1,0 +1,1 @@
+recursive-include thinknxg_workspace_studio *.json *.js *.css *.html

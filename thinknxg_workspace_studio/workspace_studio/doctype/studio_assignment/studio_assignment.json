@@ -1,0 +1,61 @@
+{
+  "doctype": "DocType",
+  "name": "Studio Assignment",
+  "module": "Workspace Studio",
+  "custom": 0,
+  "autoname": "hash",
+  "issingle": 0,
+  "fields": [
+    {
+      "fieldname": "studio_workspace",
+      "label": "Studio Workspace",
+      "fieldtype": "Link",
+      "options": "Studio Workspace",
+      "reqd": 1
+    },
+    {
+      "fieldname": "target_type",
+      "label": "Target Type",
+      "fieldtype": "Select",
+      "options": "User\nRole\nDepartment\nCompany",
+      "reqd": 1
+    },
+    {
+      "fieldname": "target_name",
+      "label": "Target Name",
+      "fieldtype": "Data",
+      "reqd": 1
+    },
+    {
+      "fieldname": "enabled",
+      "label": "Enabled",
+      "fieldtype": "Check",
+      "default": 1
+    },
+    {
+      "fieldname": "priority",
+      "label": "Priority",
+      "fieldtype": "Int",
+      "default": 100
+    }
+  ],
+  "permissions": [
+    {
+      "role": "System Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "export": 1
+    },
+    {
+      "role": "Workspace Studio Manager",
+      "read": 1,
+      "write": 1,
+      "create": 1,
+      "delete": 1,
+      "export": 1
+    }
+  ],
+  "track_changes": 1
+}
