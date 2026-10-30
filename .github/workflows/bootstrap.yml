@@ -1,0 +1,27 @@
+name: Expand Workspace Studio source
+on:
+  push:
+    paths:
+      - '.bootstrap/workspace-studio.tar.xz.b64'
+      - '.github/workflows/bootstrap.yml'
+permissions:
+  contents: write
+jobs:
+  expand:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Expand Frappe app source
+        run: |
+          base64 -d .bootstrap/workspace-studio.tar.xz.b64 > /tmp/workspace-studio.tar.xz
+          tar -xJf /tmp/workspace-studio.tar.xz
+          python -m compileall -q thinknxg_workspace_studio
+      - name: Commit app source
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .
+          git diff --cached --quiet || git commit -m "feat: install Workspace Studio Frappe v16 app sources"
+          git push
