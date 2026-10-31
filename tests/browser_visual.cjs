@@ -19,7 +19,19 @@ const root=path.join(__dirname,'..');
   await page.waitForSelector('#wss-canvas');
   const fill=async(label,value)=>{const el=page.locator('[data-field="'+label+'"]');await el.fill(value);await el.dispatchEvent('change');};
   const badge=i=>page.locator('.wss-block').nth(i).locator('.wss-col-badge').textContent();
+  // A blank title is flagged on the field itself, focused, and fillable from a native Workspace.
+  await page.locator('#wss-save').click();await page.waitForFunction(()=>!document.querySelector('#wss-save').disabled);
+  assert.equal(await page.locator('#wss-title').getAttribute('aria-invalid'),'true');
+  await page.waitForFunction(()=>document.activeElement.id==='wss-title');
+  await page.locator('#wss-title').blur();
+  await page.locator('#wss-errors').getByRole('button',{name:'Enter title'}).click();
+  await page.waitForFunction(()=>document.activeElement.id==='wss-title');
+  await page.locator('#wss-target').selectOption('Stock');
+  assert.equal(await page.locator('#wss-title').inputValue(),'Stock');
+  await page.locator('#wss-target').selectOption('');
   await page.locator('#wss-title').fill('Visual Ops');
+  assert.equal(await page.locator('#wss-title').getAttribute('aria-invalid'),'false');
+  assert.equal(await page.locator('.wss-desk-head > span:last-child').textContent(),'Visual Ops');
   await page.locator('#wss-module').selectOption('Selling');
 
   // Resize a chart from 6 to fewer columns by dragging its right edge; undo and redo it.
@@ -119,6 +131,6 @@ const root=path.join(__dirname,'..');
   const width=await page.locator('.wss-desk').evaluate(el=>el.getBoundingClientRect().width);
   assert.ok(width<=391,'mobile preview width '+width);
   assert.deepEqual(errors,[]);
-  console.log('PASS browser visual: resize, undo/redo, inline title, tools, keyboard, sidebar nesting, library drops, icon picker, visibility, audience, preview devices');
+  console.log('PASS browser visual: title guidance, resize, undo/redo, inline title, tools, keyboard, sidebar nesting, library drops, icon picker, visibility, audience, preview devices');
  } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

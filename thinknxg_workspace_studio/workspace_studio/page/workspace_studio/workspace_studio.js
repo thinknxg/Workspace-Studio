@@ -91,7 +91,8 @@ frappe.pages['workspace-studio'].on_page_load = async wrapper => {
             <div class="wss-identity">
                 <span class="wss-brand-mark" id="wss-brand-icon"></span>
                 <div class="wss-identity-text">
-                    <input id="wss-title" class="wss-title-input" placeholder="${esc(__('Untitled workspace'))}" aria-label="Workspace title" autocomplete="off">
+                    <label class="wss-title-label" for="wss-title">Workspace title <span class="wss-req">*</span></label>
+                    <input id="wss-title" class="wss-title-input" placeholder="${esc(__('Type a workspace title, e.g. Sales Operations'))}" aria-label="Workspace title" aria-required="true" autocomplete="off">
                     <div class="wss-meta-line"><span class="wss-kicker">thinkNXG Workspace Studio</span><span id="wss-status" class="wss-pill" role="status">${esc(__('New design'))}</span><span id="wss-audience-pill" class="wss-pill wss-pill-soft"></span></div>
                 </div>
             </div>
@@ -164,17 +165,21 @@ frappe.pages['workspace-studio'].on_page_load = async wrapper => {
         const result = issues(strict);
         const module = root.find('#wss-module').val();
         root.find('#wss-module').attr('aria-invalid', !module || !boot.modules.includes(module) ? 'true' : 'false');
+        root.find('#wss-title').attr('aria-invalid', result.includes('Workspace title required') ? 'true' : 'false');
         const box = root.find('#wss-errors').empty();
         if (result.length) {
             const ul = $('<ul></ul>').appendTo(box.append($('<strong></strong>').text(__('Fix before saving or publishing'))));
             result.forEach(message => {
                 const li = $('<li></li>').text(message).appendTo(ul);
                 const m = /^(workspace|sidebar|dock|desktop) item (\d+)/.exec(message);
+                if (message === 'Workspace title required') $('<button type="button" class="btn btn-xs btn-link">Enter title</button>').on('click', focusTitle).appendTo(li);
                 if (m) $('<button type="button" class="btn btn-xs btn-link">Show</button>').on('click', () => { surface = m[1]; selected = Number(m[2]) - 1; preview = false; render(); }).appendTo(li);
             });
         }
         return result;
     }
+    // Deferred so it runs after a busy action re-enables the inputs.
+    function focusTitle() { setTimeout(() => { const el = root.find('#wss-title'); el[0].scrollIntoView({block: 'center'}); el.trigger('focus'); }, 0); }
     // Item-level problems drawn directly on canvas blocks.
     function itemIssues() {
         const map = {};
@@ -374,7 +379,7 @@ frappe.pages['workspace-studio'].on_page_load = async wrapper => {
         const frame = $('<div class="wss-desk"></div>').appendTo(stage);
         const canvas = $('<div id="wss-canvas" class="wss-canvas"></div>');
         if (surface === 'workspace') {
-            frame.append($('<div class="wss-desk-head"></div>').append($(iconHtml(wsIcon, title)), $('<span></span>').text(title)), canvas.addClass('wss-grid'));
+            frame.append($('<div class="wss-desk-head" role="button" tabindex="0" title="Edit workspace title"></div>').toggleClass('is-untitled', !String(root.find('#wss-title').val() || '').trim()).append($(iconHtml(wsIcon, title)), $('<span></span>').text(title)), canvas.addClass('wss-grid'));
         } else if (surface === 'sidebar') {
             const side = $('<div class="wss-desk-side"></div>').append($('<div class="wss-side-title"></div>').text(state.navigation.title || title), canvas.addClass('wss-tree'));
             frame.addClass('wss-desk-split').append(side, '<div class="wss-ghost-content"><i></i><i></i><i></i><i></i></div>');
@@ -519,6 +524,7 @@ frappe.pages['workspace-studio'].on_page_load = async wrapper => {
             if (surface === 'desktop') surf.append($('<p class="wss-note"></p>').text(__('Desktop Icons need Desktop Settings → Desktop Icons. Removing an icon here does not delete one that is already published.')));
         }
         const look = section(host, __('Workspace identity'));
+        control(look, {fieldtype: 'Data', label: 'Workspace title', reqd: 1}, root.find('#wss-title').val(), v => { root.find('#wss-title').val(v || ''); changed(); drawCanvas(); updateChrome(); });
         iconPicker(look, __('Workspace icon'), wsIcon, root.find('#wss-title').val(), v => mutate(() => { wsIcon = v; }));
 
         const caps = boot.capabilities?.assignment_targets;
@@ -673,6 +679,7 @@ frappe.pages['workspace-studio'].on_page_load = async wrapper => {
     });
 
     /* ---------- selection, tools, inline editing ---------- */
+    root.on('click', '.wss-desk-head', e => { if (!preview) { e.stopPropagation(); focusTitle(); } });
     root.on('click', '.wss-palette-item', function () { if (!preview) { const el = $(this); insert(fromPalette({type: el.attr('data-type'), linkType: el.attr('data-link-type'), name: el.attr('data-name')})); } });
     root.on('input', '#wss-palette-search', renderPalette);
     root.on('click', '.wss-tool', function (e) {
@@ -730,7 +737,12 @@ frappe.pages['workspace-studio'].on_page_load = async wrapper => {
     root.find('#wss-redo').on('click', redo);
     root.find('#wss-preview').on('click', () => { preview = !preview; render(); });
     root.find('#wss-validate').on('click', () => { if (!errors(true).length) frappe.show_alert({message: __('Design is valid locally; native schema checks run at publish.'), indicator: 'green'}); });
-    root.find('#wss-title').on('input', () => { drawCanvas(); updateChrome(); });
+    root.find('#wss-title').on('input', () => { root.find('#wss-title').attr('aria-invalid', 'false'); drawCanvas(); updateChrome(); });
+    root.find('#wss-target').on('change', () => {
+        const el = root.find('#wss-title'), target = root.find('#wss-target').val();
+        const ws = (boot.native_workspaces || []).find(w => w.name === target);
+        if (ws && !String(el.val() || '').trim()) { el.val(ws.title || ws.name); drawCanvas(); }
+    });
     root.find('#wss-title,#wss-module,#wss-target').on('change', () => { changed(); updateChrome(); });
     $(document).on('keydown.wss', e => {
         if (!root.is(':visible') || busy) return;
@@ -774,7 +786,9 @@ frappe.pages['workspace-studio'].on_page_load = async wrapper => {
         root.find('#wss-existing').val(current || '');
     }
     async function save(strict = false) {
-        if (errors(strict).length) throw Error('Correct the validation errors before saving.');
+        const problems = errors(strict);
+        if (problems.includes('Workspace title required')) focusTitle();
+        if (problems.length) throw Error('Correct the validation errors before saving.');
         const result = await call('save_design', {name: current, title: root.find('#wss-title').val(), module: root.find('#wss-module').val(), target_workspace: root.find('#wss-target').val(), scope, icon: wsIcon,
             assignments: JSON.stringify(assignments), layout: JSON.stringify(state.layout), navigation: JSON.stringify(state.navigation), dock: JSON.stringify(state.dock)});
         current = result.name; dirty = false; setStatus(__('Saved draft'), 'ok'); await refresh();
@@ -796,7 +810,8 @@ frappe.pages['workspace-studio'].on_page_load = async wrapper => {
     }));
     // The note callback saves the exact visible design before invoking the existing guarded publisher.
     root.find('#wss-publish').on('click', () => {
-        if (!boot.can_publish || errors(true).length) return;
+        if (!boot.can_publish) return;
+        if (errors(true).length) { if (!String(root.find('#wss-title').val() || '').trim()) focusTitle(); return; }
         frappe.prompt([{fieldtype: 'Small Text', fieldname: 'note', label: 'Publish note', reqd: 1}], values => working(async () => {
             await save(true); const result = await call('publish', {name: current, note: values.note});
             root.find('#wss-target').val(result.workspace); setStatus(__('Published · backup {0}', [result.version]), 'ok');
