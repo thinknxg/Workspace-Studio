@@ -26,8 +26,13 @@
 .wss-identity { display: flex; align-items: center; gap: 12px; min-width: 260px; flex: 1; }
 .wss-brand-mark .wss-ico { width: 44px; height: 44px; border-radius: 12px; font-size: 18px; }
 .wss-identity-text { flex: 1; min-width: 0; }
-.wss-title-input { width: 100%; max-width: 520px; border: 1px solid transparent; background: transparent; font-size: 22px; font-weight: 650; letter-spacing: -0.01em; padding: 2px 6px; margin-left: -7px; border-radius: 8px; color: var(--wss-ink); }
-.wss-title-input:hover { border-color: var(--wss-line); }
+.wss-title-label { display: block; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--wss-muted); margin: 0 0 3px; }
+.wss-req { color: var(--wss-danger); }
+.wss-title-input { width: 100%; max-width: 520px; border: 1px solid var(--wss-line); background: var(--wss-card); font-size: 20px; font-weight: 650; letter-spacing: -0.01em; padding: 4px 10px; border-radius: 8px; color: var(--wss-ink); }
+.wss-title-input::placeholder { font-weight: 500; font-size: 16px; color: var(--wss-muted); }
+.wss-title-input:placeholder-shown { border-style: dashed; }
+.wss-title-input:hover { border-color: var(--gray-400, #c0c6cc); }
+.wss-title-input[aria-invalid="true"] { border: 1px solid var(--wss-danger); box-shadow: 0 0 0 3px var(--red-50, #fff1f1); }
 .wss-title-input:focus { outline: none; border-color: var(--wss-accent); background: var(--wss-card); box-shadow: 0 0 0 3px var(--wss-accent-soft); }
 .wss-meta-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
 .wss-kicker { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--wss-muted); }
@@ -98,6 +103,9 @@
 .wss-stage.is-preview .wss-desk { background-image: none; }
 .wss-stage.is-dropping .wss-desk { border-color: var(--wss-accent); box-shadow: 0 0 0 3px var(--wss-accent-soft); }
 .wss-desk-head { display: flex; align-items: center; gap: 10px; padding: 14px 18px; font-size: 17px; font-weight: 650; border-bottom: 1px solid var(--wss-line); background: var(--wss-card); }
+.wss-desk-head { cursor: text; }
+.wss-stage.is-preview .wss-desk-head { cursor: default; }
+.wss-desk-head.is-untitled span { color: var(--wss-muted); font-style: italic; }
 .wss-desk-head .wss-ico { width: 28px; height: 28px; border-radius: 8px; }
 .wss-canvas { position: relative; min-height: 380px; padding: 18px; }
 
